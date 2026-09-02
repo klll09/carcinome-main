@@ -27,5 +27,5 @@ export const CONFIG = {
   //    design; the server side is independently gated on
   //    settings.portal.sample_login so flipping this alone cannot open a
   //    real deployment.
-  SAMPLE_LOGIN: true,
+  SAMPLE_LOGIN: false,
 };
