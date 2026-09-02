@@ -1,0 +1,77 @@
+{
+  "version": "7.0",
+  "routing_model": {
+    "FEEDBACK": []
+  },
+  "screens": [
+    {
+      "id": "FEEDBACK",
+      "title": "प्रतिक्रिया / Feedback",
+      "terminal": true,
+      "success": true,
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "आपका अनुभव / Your experience"
+          },
+          {
+            "type": "Form",
+            "name": "feedback_form",
+            "children": [
+              {
+                "type": "RadioButtonsGroup",
+                "name": "overall",
+                "label": "कुल अनुभव / Overall",
+                "required": true,
+                "data-source": [
+                  { "id": "5", "title": "5 - उत्कृष्ट / Excellent" },
+                  { "id": "4", "title": "4 - अच्छा / Good" },
+                  { "id": "3", "title": "3 - ठीक / Okay" },
+                  { "id": "2", "title": "2 - खराब / Poor" },
+                  { "id": "1", "title": "1 - बहुत खराब / Very poor" }
+                ]
+              },
+              {
+                "type": "RadioButtonsGroup",
+                "name": "nurse_care",
+                "label": "नर्स देखभाल / Nurse care",
+                "data-source": [
+                  { "id": "5", "title": "5 - उत्कृष्ट / Excellent" },
+                  { "id": "4", "title": "4 - अच्छा / Good" },
+                  { "id": "3", "title": "3 - ठीक / Okay" },
+                  { "id": "2", "title": "2 - खराब / Poor" },
+                  { "id": "1", "title": "1 - बहुत खराब / Very poor" }
+                ]
+              },
+              {
+                "type": "OptIn",
+                "name": "recommend",
+                "label": "मैं कार्सिनोम होम केयर की सिफ़ारिश करूंगा/करूंगी / I would recommend Carcinome Home Care"
+              },
+              {
+                "type": "TextArea",
+                "name": "comments",
+                "label": "सुझाव / Comments"
+              },
+              {
+                "type": "Footer",
+                "label": "भेजें / Submit",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "overall": "${form.overall}",
+                    "nurse_care": "${form.nurse_care}",
+                    "recommend": "${form.recommend}",
+                    "comments": "${form.comments}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

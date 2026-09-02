@@ -1,0 +1,94 @@
+{
+  "version": "7.0",
+  "routing_model": {
+    "REPORT": []
+  },
+  "screens": [
+    {
+      "id": "REPORT",
+      "title": "सेशन रिपोर्ट / Report",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "case_line": {
+          "type": "string",
+          "__example__": "CASE-2026-0012 • मीरा शर्मा / Meera Sharma • 18 Jul 2026"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextSubheading",
+            "text": "${data.case_line}"
+          },
+          {
+            "type": "Form",
+            "name": "completion_form",
+            "children": [
+              {
+                "type": "TextArea",
+                "name": "meds_administered",
+                "label": "दवाएं / Medicines",
+                "required": true,
+                "helper-text": "दी गई दवाएं और डोज़ / Medicines and doses administered"
+              },
+              {
+                "type": "TextInput",
+                "name": "started_hhmm",
+                "label": "शुरू समय / Start",
+                "input-type": "text",
+                "helper-text": "जैसे / e.g. 10:30"
+              },
+              {
+                "type": "TextInput",
+                "name": "ended_hhmm",
+                "label": "समाप्ति / End",
+                "input-type": "text",
+                "helper-text": "जैसे / e.g. 12:15"
+              },
+              {
+                "type": "RadioButtonsGroup",
+                "name": "complications",
+                "label": "जटिलताएं / Complications",
+                "required": true,
+                "data-source": [
+                  { "id": "none", "title": "कोई नहीं / None" },
+                  { "id": "minor", "title": "मामूली / Minor" },
+                  { "id": "major", "title": "गंभीर / Major" }
+                ]
+              },
+              {
+                "type": "TextArea",
+                "name": "complication_notes",
+                "label": "जटिलता नोट / Note",
+                "helper-text": "जटिलता होने पर विवरण दें / Describe any complication"
+              },
+              {
+                "type": "TextArea",
+                "name": "notes",
+                "label": "अन्य नोट्स / Notes"
+              },
+              {
+                "type": "Footer",
+                "label": "रिपोर्ट भेजें / Submit",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "meds_administered": "${form.meds_administered}",
+                    "started_hhmm": "${form.started_hhmm}",
+                    "ended_hhmm": "${form.ended_hhmm}",
+                    "complications": "${form.complications}",
+                    "complication_notes": "${form.complication_notes}",
+                    "notes": "${form.notes}",
+                    "case_line": "${data.case_line}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

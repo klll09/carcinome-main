@@ -1,0 +1,121 @@
+{
+  "version": "7.0",
+  "routing_model": {
+    "INFO": ["FORM"],
+    "FORM": []
+  },
+  "screens": [
+    {
+      "id": "INFO",
+      "title": "सहमति / Consent",
+      "data": {
+        "summary": {
+          "type": "string",
+          "__example__": "CASE-2026-0012 • कीमो इन्फ्यूज़न / Chemo infusion • शनिवार 18 जुलाई, सुबह 10:00"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "TextHeading",
+            "text": "होम-केयर सहमति / Home-care consent"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.summary}"
+          },
+          {
+            "type": "TextBody",
+            "text": "• प्रक्रिया आपको समझाई गई है / The procedure has been explained to you\n• संभावित जटिलताएं बताई गई हैं / Possible complications have been discussed\n• आप किसी भी समय सहमति वापस ले सकते हैं / You may withdraw consent at any time\n• देखभाल के समन्वय के लिए आपके स्वास्थ्य-डेटा का उपयोग होगा / Your health data will be used to coordinate this care"
+          },
+          {
+            "type": "Footer",
+            "label": "आगे बढ़ें / Continue",
+            "on-click-action": {
+              "name": "navigate",
+              "next": {
+                "type": "screen",
+                "name": "FORM"
+              },
+              "payload": {
+                "summary": "${data.summary}"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "FORM",
+      "title": "सहमति फ़ॉर्म / Form",
+      "terminal": true,
+      "success": true,
+      "data": {
+        "summary": {
+          "type": "string",
+          "__example__": "CASE-2026-0012 • कीमो इन्फ्यूज़न / Chemo infusion • शनिवार 18 जुलाई, सुबह 10:00"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "consent_form",
+            "children": [
+              {
+                "type": "TextInput",
+                "name": "signed_name",
+                "label": "नाम / Full name",
+                "input-type": "text",
+                "required": true,
+                "helper-text": "हस्ताक्षरकर्ता का पूरा नाम / Full name of person signing"
+              },
+              {
+                "type": "Dropdown",
+                "name": "relationship",
+                "label": "रिश्ता / Relation",
+                "required": true,
+                "data-source": [
+                  { "id": "self", "title": "स्वयं / Self" },
+                  { "id": "spouse", "title": "पति-पत्नी / Spouse" },
+                  { "id": "parent", "title": "माता-पिता / Parent" },
+                  { "id": "child", "title": "संतान / Child" },
+                  { "id": "guardian", "title": "अभिभावक / Guardian" },
+                  { "id": "other", "title": "अन्य / Other" }
+                ]
+              },
+              {
+                "type": "OptIn",
+                "name": "consent_care",
+                "required": true,
+                "label": "मैं होम-केयर प्रक्रिया के लिए सहमति देता/देती हूं / I consent to the home-care procedure"
+              },
+              {
+                "type": "OptIn",
+                "name": "consent_data",
+                "required": true,
+                "label": "देखभाल के लिए स्वास्थ्य-डेटा के उपयोग की सहमति देता/देती हूं / I consent to use of my health data for this care"
+              },
+              {
+                "type": "Footer",
+                "label": "सहमत होकर भेजें / Submit",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "signed_name": "${form.signed_name}",
+                    "relationship": "${form.relationship}",
+                    "consent_care": "${form.consent_care}",
+                    "consent_data": "${form.consent_data}",
+                    "summary": "${data.summary}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

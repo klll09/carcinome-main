@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="description" content="Carcinome Home Care — WhatsApp-first oncology home-care coordination dashboard." />
+  <meta name="theme-color" content="#0F8A5F" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="format-detection" content="telephone=no" />
+
+  <!-- Force GitHub Pages / browser to NEVER serve a stale copy of this HTML.
+       Without this, GH Pages caches HTML for 10 min, so users keep seeing
+       last week's broken JS even after a deploy. -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+
+  <title>Carcinome Home Care</title>
+
+  <!-- Apply the saved theme BEFORE stylesheets paint — no light flash. -->
+  <script>
+    try {
+      var t = localStorage.getItem('carcinome_theme');
+      if (t === 'dark' || t === 'colorful') document.documentElement.dataset.theme = t;
+      if (t === 'dark') {
+        document.documentElement.style.background = '#0B0C0B';
+        var m = document.querySelector('meta[name="theme-color"]');
+        if (m) m.setAttribute('content', '#0B0C0B');
+      }
+    } catch (e) {}
+  </script>
+
+  <!-- Connection hints (don't block render, just speed up subsequent fetches) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+
+  <!-- Critical inline CSS for the boot screen — guarantees something paints
+       even if every external resource (CDN/font/CSS) is blocked or slow. -->
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body{background:#F7F6F2;color:#1D2733;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+    .boot-screen{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;padding:24px;text-align:center;
+      background:radial-gradient(90% 60% at 82% -10%,rgba(53,192,141,.26),transparent 55%),radial-gradient(70% 50% at -10% 110%,rgba(214,111,92,.12),transparent 60%),linear-gradient(160deg,#12291F 0%,#0C1D16 46%,#081410 100%)}
+    .boot-logo{width:52px;height:52px;border-radius:15px;display:grid;place-items:center;color:#fff;background:linear-gradient(180deg,#16A371,#0F8A5F 58%,#0C6F4E);box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 8px 24px rgba(15,138,95,.5);animation:bootfloat 5s ease-in-out infinite}
+    @keyframes bootfloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+    .boot-word{font-weight:800;font-size:clamp(19px,5.2vw,27px);line-height:1;letter-spacing:.2em;padding-left:.2em;text-transform:uppercase;color:#EEF2F8}
+    .boot-tag{font-size:10px;font-weight:600;letter-spacing:.38em;padding-left:.38em;text-transform:uppercase;color:#7CA68F;margin-top:10px}
+    .boot-ecg{width:min(280px,70vw);height:36px;color:#35C08D;filter:drop-shadow(0 0 7px rgba(53,192,141,.6))}
+    .boot-ecg path{stroke-dasharray:430;stroke-dashoffset:430;animation:bootecg 2.6s cubic-bezier(.22,.68,.16,1) infinite}
+    @keyframes bootecg{0%{stroke-dashoffset:430;opacity:0}10%{opacity:1}60%{stroke-dashoffset:0;opacity:1}82%{opacity:0}100%{stroke-dashoffset:0;opacity:0}}
+    .boot-msg{color:#AECEBE;font-size:13.5px;line-height:1.5;max-width:340px}
+    .boot-link{color:#8FD4B7;font-size:13px;text-decoration:underline;cursor:pointer;background:none;border:none;font-family:inherit;padding:8px 16px}
+    .boot-link:hover{color:#C2F8DF}
+    .boot-error{color:#F0968B}
+  </style>
+
+  <!-- Non-blocking font load: preload-as-style trick + noscript fallback -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" onload="this.onload=null;this.rel='stylesheet'" />
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" /></noscript>
+
+  <!-- App stylesheets — query string busts the cache when CSS changes -->
+  <link rel="stylesheet" href="css/variables.css?v=20260820e" />
+  <link rel="stylesheet" href="css/base.css?v=20260820e" />
+  <link rel="stylesheet" href="css/components.css?v=20260820e" />
+  <link rel="stylesheet" href="css/layout.css?v=20260820e" />
+  <!-- Landing + patient/nurse/doctor portals. Loaded here rather than injected
+       on demand (the way journeys.css is) because #welcome is the first screen
+       every signed-out visitor sees: an injected sheet would flash unstyled. -->
+  <link rel="stylesheet" href="css/portal.css?v=20260820e" />
+
+  <!-- Favicon (inline SVG data URI) -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230F8A5F' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z'/><path d='M3.2 12h4l1.8-3 2.4 5 1.8-2h4.6'/></svg>" />
+</head>
+<body>
+  <!-- Boot screen — paints immediately, no external dependencies. -->
+  <div id="app">
+    <div class="boot-screen" id="boot-screen">
+      <div class="boot-logo">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>
+      </div>
+      <div>
+        <div class="boot-word">Carcinome</div>
+        <div class="boot-tag">Home Care</div>
+      </div>
+      <svg class="boot-ecg" viewBox="0 0 280 36" fill="none" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M0 18 H92 L104 18 112 6 122 30 130 18 H188 L196 18 202 11 208 25 214 18 H280" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <p class="boot-msg" id="boot-msg">Preparing the care board…</p>
+      <button class="boot-link" id="boot-retry" style="display:none" onclick="location.reload()">Retry</button>
+    </div>
+  </div>
+
+  <!-- CDN scripts: deferred so they NEVER block the boot screen.
+       defer scripts download in parallel and execute after DOM parse,
+       but BEFORE the type=module app.js (which is naturally deferred). -->
+  <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Socket.IO client for the case group chats (server/). Deferred like the
+       Supabase bundle so it never blocks the boot screen; js/portal/chat.js
+       fails with a clear message if it is blocked rather than hanging. -->
+  <script defer crossorigin="anonymous" src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+
+  <!-- App entry point — query string busts the browser cache when JS changes -->
+  <!-- KEEP THIS QUERY IN STEP WITH CONFIG.VERSION in js/config.js. app.js is the
+       only module the browser fetches by URL from here; every page module and
+       journeys.css is then fetched as ?v=CONFIG.VERSION. If the two drift, the
+       browser happily serves a CACHED app.js that then requests fresh page
+       modules, so a deploy half-lands and the symptom is "the new page is not
+       there" on a machine that has visited before. -->
+  <script type="module" src="js/app.js?v=20260820e"></script>
+
+  <!-- Boot watchdog: surfaces a clear error if external scripts fail to load
+       (network blocked, CDN down, captive portal, etc.) instead of leaving
+       the user staring at a spinner forever. -->
+  <script>
+    (function(){
+      var STAGES = {
+        SLOW:   5000,   // 5s — "taking too long"
+        SCRIPT: 10000,  // 10s — Supabase JS still not loaded → CDN blocked
+        TOTAL:  15000   // 15s — App still hasn't booted → give up cleanly
+      };
+      var bootScreen = document.getElementById('boot-screen');
+      var msg = document.getElementById('boot-msg');
+      var retry = document.getElementById('boot-retry');
+
+      // Stage 1 — gentle nudge
+      setTimeout(function(){
+        if (!bootScreen.isConnected) return;
+        if (msg) msg.textContent = 'Still loading… your network may be slow.';
+        if (retry) retry.style.display = 'inline-block';
+      }, STAGES.SLOW);
+
+      // Stage 2 — CDN diagnostic
+      setTimeout(function(){
+        if (!bootScreen.isConnected) return;
+        if (!window.supabase) {
+          if (msg) {
+            msg.classList.add('boot-error');
+            msg.innerHTML = 'Could not load required scripts.<br>Your network may be blocking jsdelivr.net.<br>Try a different network or VPN.';
+          }
+          if (retry) retry.style.display = 'inline-block';
+        }
+      }, STAGES.SCRIPT);
+
+      // Stage 3 — final timeout. If app.js never replaced the boot screen,
+      // the SPA is stuck. Show a hard fail message.
+      setTimeout(function(){
+        if (!bootScreen.isConnected) return;
+        if (msg) {
+          msg.classList.add('boot-error');
+          msg.innerHTML = 'Carcinome Home Care failed to start.<br>Please refresh the page.<br>If this keeps happening, contact the tech team.';
+        }
+        if (retry) retry.style.display = 'inline-block';
+      }, STAGES.TOTAL);
+    })();
+  </script>
+</body>
+</html>

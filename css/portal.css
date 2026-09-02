@@ -1,0 +1,559 @@
+/* ============================================================
+   CARCINOME HOME CARE — Portal + landing (patient / nurse / doctor)
+
+   Linked from index.html rather than injected on demand (the way journeys.css
+   is): #welcome is the first screen every signed-out visitor sees, so an
+   injected sheet would flash unstyled on the critical path.
+
+   Everything here is built on the tokens in variables.css, so the portal
+   re-themes with the rest of the app for free (light / dark / colorful).
+   Nothing below hardcodes a colour that has a token.
+
+   DESIGN BRIEF, because it is not the same as the admin app's:
+   this is read on a phone, one-handed, often outdoors, sometimes by an
+   elderly family member on the worst day of their year. So: one column,
+   large tap targets (44px floor), generous type, high contrast, and no
+   horizontal scrolling at any width. Density is the admin app's job.
+   ============================================================ */
+
+/* ── Landing / door pages ─────────────────────────────────────────────── */
+
+.lp-page {
+  min-height: 100dvh;
+  padding: var(--s6) var(--s5) var(--s9);
+  background:
+    radial-gradient(90% 55% at 85% -10%, var(--primary-tint), transparent 60%),
+    radial-gradient(70% 45% at -10% 105%, var(--accent-tint), transparent 60%),
+    var(--bg);
+  display: flex;
+  justify-content: center;
+}
+.lp-inner { width: 100%; max-width: 560px; }
+.lp-inner-narrow { max-width: 440px; }
+
+.lp-brand { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s8); }
+.lp-logo {
+  width: 44px; height: 44px; flex: none;
+  display: grid; place-items: center;
+  border-radius: var(--radius-lg);
+  color: var(--on-primary);
+  background: var(--grad-primary);
+  box-shadow: var(--sh-primary);
+}
+.lp-logo svg { width: 24px; height: 24px; }
+.lp-word { font: var(--t-h3); font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--ink); line-height: 1; }
+.lp-tag { font: var(--t-mono-label); letter-spacing: .3em; text-transform: uppercase; color: var(--ink-3); margin-top: 4px; }
+
+.lp-lede { margin-bottom: var(--s7); }
+.lp-lede h1 { font: var(--t-h1); color: var(--ink); margin: 0 0 var(--s3); line-height: 1.15; }
+.lp-lede p { font: var(--t-body); color: var(--ink-2); margin: 0; max-width: 48ch; line-height: var(--line-height-relaxed); }
+
+.lp-doors { display: flex; flex-direction: column; gap: var(--s3); }
+.lp-door {
+  display: flex; align-items: center; gap: var(--s4);
+  width: 100%; min-height: 76px;
+  padding: var(--s4) var(--s5);
+  text-align: left; cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--sh-1);
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease), transform var(--fast) var(--ease);
+  font-family: inherit;
+}
+.lp-door:hover { border-color: var(--primary); box-shadow: var(--sh-2); transform: translateY(-1px); }
+.lp-door:focus-visible { outline: none; box-shadow: var(--ring); }
+.lp-door-icon {
+  width: 44px; height: 44px; flex: none;
+  display: grid; place-items: center;
+  border-radius: var(--radius-lg);
+  background: var(--primary-soft); color: var(--primary);
+}
+.lp-door-icon svg { width: 21px; height: 21px; }
+.lp-door-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.lp-door-title { font: var(--t-body-strong); font-size: 16px; color: var(--ink); }
+.lp-door-sub { font: var(--t-xs); color: var(--ink-3); }
+.lp-door-blurb { font: var(--t-xs); color: var(--ink-2); margin-top: 4px; line-height: 1.45; }
+.lp-door-go { flex: none; color: var(--ink-4); display: grid; place-items: center; }
+.lp-door-go svg { width: 18px; height: 18px; }
+.lp-door:hover .lp-door-go { color: var(--primary); }
+
+.lp-help { font: var(--t-xs); color: var(--ink-3); text-align: center; margin-top: var(--s6); line-height: 1.6; }
+
+.lp-staff { display: flex; flex-direction: column; align-items: center; gap: var(--s4); margin-top: var(--s8); }
+.lp-staff-rule { width: 100%; height: 1px; background: var(--grad-hairline); }
+.lp-staff-link {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  min-height: 44px; padding: 0 var(--s4);
+  font: var(--t-xs); color: var(--ink-3);
+  background: none; border: none; border-radius: var(--radius-md);
+  cursor: pointer; font-family: inherit;
+}
+.lp-staff-link:hover { color: var(--primary); background: var(--surface-3); }
+.lp-staff-link svg { width: 14px; height: 14px; }
+
+/* ── Portal shell ─────────────────────────────────────────────────────── */
+
+.pt-shell { min-height: 100dvh; display: flex; flex-direction: column; background: var(--bg); }
+
+.pt-header {
+  position: sticky; top: 0; z-index: var(--z-nav);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  /* iPhone notch / Dynamic Island */
+  padding-top: env(safe-area-inset-top);
+}
+.pt-header-in {
+  max-width: 640px; margin: 0 auto;
+  padding: var(--s3) var(--s5);
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+}
+.pt-brand { display: flex; align-items: center; gap: var(--s3); min-width: 0; }
+.pt-logo {
+  width: 34px; height: 34px; flex: none;
+  display: grid; place-items: center;
+  border-radius: var(--radius-md);
+  color: var(--on-primary); background: var(--grad-primary);
+}
+.pt-logo svg { width: 18px; height: 18px; }
+.pt-brand-text { display: flex; flex-direction: column; min-width: 0; }
+.pt-brand-name { font: var(--t-body-strong); color: var(--ink); letter-spacing: .04em; line-height: 1.1; }
+.pt-brand-sub { font: var(--t-xs); color: var(--ink-3); line-height: 1.3; }
+.pt-signout {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 40px; padding: 0 var(--s3); flex: none;
+  font: var(--t-xs); color: var(--ink-3);
+  background: none; border: 1px solid var(--line); border-radius: var(--radius-md);
+  cursor: pointer; font-family: inherit;
+}
+.pt-signout:hover { color: var(--danger); border-color: var(--danger); }
+.pt-signout svg { width: 14px; height: 14px; }
+
+.pt-main { flex: 1; width: 100%; max-width: 640px; margin: 0 auto; padding: var(--s6) var(--s5) var(--s9); }
+.pt-greet { margin-bottom: var(--s6); }
+.pt-greet h1 { font: var(--t-h1); font-size: clamp(24px, 6vw, 30px); color: var(--ink); margin: 0 0 4px; }
+.pt-greet p { font: var(--t-sm); color: var(--ink-3); margin: 0; }
+
+.pt-footer {
+  padding: var(--s6) var(--s5) calc(var(--s6) + env(safe-area-inset-bottom));
+  text-align: center; font: var(--t-xs); color: var(--ink-4);
+  line-height: 1.7; border-top: 1px solid var(--line);
+}
+
+.pt-back {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 44px; margin-bottom: var(--s4); padding: 0;
+  font: var(--t-sm); color: var(--ink-3);
+  background: none; border: none; cursor: pointer; font-family: inherit;
+}
+.pt-back:hover { color: var(--primary); }
+.pt-back svg { width: 16px; height: 16px; }
+
+/* ── Cards, sections, alerts ──────────────────────────────────────────── */
+
+.pt-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  padding: var(--s5);
+  box-shadow: var(--sh-1);
+}
+.pt-card + .pt-card { margin-top: var(--s3); }
+.pt-center { text-align: center; }
+.pt-center h2 { font: var(--t-h3); color: var(--ink); margin: var(--s4) 0 var(--s2); }
+.pt-muted { font: var(--t-sm); color: var(--ink-3); margin: 0; line-height: 1.6; }
+
+.pt-section { margin-bottom: var(--s7); }
+.pt-h2 {
+  display: flex; align-items: center; gap: var(--s2);
+  font: var(--t-mono-label); text-transform: uppercase; letter-spacing: .1em;
+  color: var(--ink-3); margin: 0 0 var(--s3); padding: 0 var(--s1);
+}
+.pt-h2 svg { width: 15px; height: 15px; }
+.pt-h2-warn { color: var(--warn); }
+.pt-section-note { font: var(--t-xs); color: var(--ink-3); margin: 0 0 var(--s3); padding: 0 var(--s1); line-height: 1.6; }
+
+.pt-alert {
+  border-radius: var(--radius-xl);
+  padding: var(--s5);
+  margin-bottom: var(--s4);
+  border: 1px solid;
+}
+.pt-alert p { font: var(--t-sm); margin: 0 0 var(--s2); line-height: 1.6; }
+.pt-alert-head {
+  display: flex; align-items: center; gap: var(--s2);
+  font: var(--t-body-strong); margin-bottom: var(--s3);
+}
+.pt-alert-head svg { width: 18px; height: 18px; }
+.pt-alert-meta { font: var(--t-xs) !important; opacity: .85; }
+/* "act now" vs "answer us" get different colours so a glance separates them */
+.pt-alert-do { background: var(--st-in-care-soft); border-color: var(--st-in-care); color: var(--st-in-care); }
+.pt-alert-ask { background: var(--st-offering-soft); border-color: var(--st-offering); color: var(--st-offering); }
+.pt-alert-do p, .pt-alert-ask p { color: var(--ink); }
+
+.pt-notice {
+  display: flex; gap: var(--s3);
+  padding: var(--s5);
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.pt-notice-icon { flex: none; color: var(--ink-3); }
+.pt-notice-icon svg { width: 20px; height: 20px; }
+.pt-notice-head { font: var(--t-body-strong); color: var(--ink); margin-bottom: 4px; }
+.pt-notice p { font: var(--t-sm); color: var(--ink-2); margin: 0; line-height: 1.6; }
+.pt-notice-error { border-color: var(--danger); }
+.pt-notice-error .pt-notice-icon { color: var(--danger); }
+.pt-notice-ok { border-color: var(--ok); }
+.pt-notice-ok .pt-notice-icon { color: var(--ok); }
+
+.pt-empty {
+  text-align: center; padding: var(--s7) var(--s5);
+  border: 1px dashed var(--line); border-radius: var(--radius-xl);
+  color: var(--ink-3);
+}
+.pt-empty svg { width: 26px; height: 26px; color: var(--ok); margin-bottom: var(--s2); }
+.pt-empty p { font: var(--t-sm); margin: 0; }
+
+/* ── Session + offer cards ────────────────────────────────────────────── */
+
+/* wrap, don't squeeze: on a 390px screen a full date next to a status chip
+   otherwise breaks mid-timestamp and orphans the "pm". The chip drops to its
+   own line instead, which stays readable. */
+.pt-card-top {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--s3); row-gap: var(--s2); flex-wrap: wrap; margin-bottom: var(--s2);
+}
+.pt-when { font: var(--t-mono); font-size: 15px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.pt-code { font: var(--t-mono); font-size: 12px; color: var(--ink-3); }
+.pt-ago { font: var(--t-xs); color: var(--ink-4); }
+
+.pt-chip {
+  font: var(--t-mono-label); text-transform: uppercase; letter-spacing: .07em;
+  padding: 3px 9px; border-radius: var(--radius-full); white-space: nowrap;
+  background: var(--bg-sunken); color: var(--ink-2);
+}
+.pt-chip-assigned { background: var(--st-assigned-soft); color: var(--st-assigned); }
+.pt-chip-consented { background: var(--st-consented-soft); color: var(--st-consented); }
+.pt-chip-otp_sent { background: var(--st-otp-sent-soft); color: var(--st-otp-sent); }
+.pt-chip-in_care { background: var(--st-in-care-soft); color: var(--st-in-care); }
+.pt-chip-care_done,
+.pt-chip-awaiting_payment { background: var(--st-care-done-soft); color: var(--st-care-done); }
+.pt-chip-paid { background: var(--st-paid-soft); color: var(--st-paid); }
+
+.pt-session.is-overdue { border-color: var(--warn); }
+.pt-patient { font: var(--t-h3); font-size: 19px; color: var(--ink); margin: 0 0 2px; }
+.pt-sub { font: var(--t-xs); color: var(--ink-3); margin-bottom: var(--s4); }
+
+.pt-address, .pt-equip {
+  display: flex; gap: var(--s2); align-items: flex-start;
+  font: var(--t-sm); color: var(--ink-2);
+  padding: var(--s3); margin-bottom: var(--s2);
+  background: var(--surface-3); border-radius: var(--radius-md);
+  line-height: 1.5;
+}
+.pt-address svg, .pt-equip svg { width: 16px; height: 16px; flex: none; margin-top: 1px; color: var(--ink-3); }
+
+.pt-next {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: var(--s3) var(--s4); margin: var(--s4) 0 var(--s3);
+  border-left: 3px solid var(--line);
+  font: var(--t-sm); color: var(--ink-2); line-height: 1.55;
+}
+.pt-next-label { font: var(--t-mono-label); text-transform: uppercase; letter-spacing: .1em; color: var(--ink-4); }
+.pt-next-do { border-left-color: var(--st-in-care); background: var(--st-in-care-soft); }
+.pt-next-do .pt-next-label { color: var(--st-in-care); }
+.pt-next-done { border-left-color: var(--ok); }
+.pt-next-done .pt-next-label { color: var(--ok); }
+
+.pt-offer-care { font: var(--t-body-strong); color: var(--ink); margin-bottom: var(--s3); }
+.pt-kv { display: flex; flex-direction: column; gap: var(--s2); margin: 0 0 var(--s4); }
+.pt-kv > div { display: flex; gap: var(--s3); align-items: baseline; }
+.pt-kv dt { font: var(--t-xs); color: var(--ink-4); width: 52px; flex: none; text-transform: uppercase; letter-spacing: .06em; }
+.pt-kv dd { font: var(--t-sm); color: var(--ink); margin: 0; }
+
+/* ── Stats ────────────────────────────────────────────────────────────── */
+
+.pt-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s2); margin-bottom: var(--s5); }
+.pt-stat {
+  text-align: center; padding: var(--s4) var(--s2);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg);
+}
+.pt-stat-n { display: block; font: var(--t-h2); font-size: 24px; color: var(--primary); line-height: 1; }
+.pt-stat-l { display: block; font: var(--t-xs); color: var(--ink-3); margin-top: 6px; line-height: 1.35; }
+/* Three across → each label stacks onto two lines. */
+.pt-stat-l > span { display: block; }
+@media (max-width: 420px) {
+  /* One per row → label sits on a single line beside the number, so the two
+     halves run inline again (with the whitespace between them intact). */
+  .pt-stats { grid-template-columns: 1fr; }
+  .pt-stat { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); text-align: left; padding: var(--s3) var(--s4); }
+  .pt-stat-l { margin-top: 0; text-align: right; }
+  .pt-stat-l > span { display: inline; }
+}
+
+/* ── Forms + buttons ──────────────────────────────────────────────────── */
+
+.pt-label { display: block; font: var(--t-body-strong); font-size: 14px; color: var(--ink); margin-bottom: var(--s2); }
+.pt-phone { display: flex; align-items: stretch; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); overflow: hidden; }
+.pt-phone:focus-within { border-color: var(--primary); box-shadow: var(--ring); }
+.pt-phone-cc {
+  display: grid; place-items: center; padding: 0 var(--s4); flex: none;
+  font: var(--t-mono); color: var(--ink-3);
+  background: var(--surface-3); border-right: 1px solid var(--line);
+}
+.pt-input {
+  flex: 1; min-width: 0; border: none; outline: none; background: none;
+  padding: var(--s4); color: var(--ink);
+  /* 16px minimum: anything smaller makes iOS Safari zoom on focus */
+  font: var(--t-body); font-size: 17px; letter-spacing: .04em;
+  font-family: inherit;
+}
+.pt-field-error { font: var(--t-xs); color: var(--danger); margin-top: var(--s2); }
+.pt-fineprint { font: var(--t-xs); color: var(--ink-4); margin: var(--s3) 0 0; line-height: 1.6; text-align: center; }
+
+.pt-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
+  width: 100%; min-height: 50px; margin-top: var(--s4);
+  padding: 0 var(--s5);
+  font: var(--t-body-strong); font-size: 15px; font-family: inherit;
+  border: 1px solid transparent; border-radius: var(--radius-lg);
+  cursor: pointer; text-decoration: none;
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease), opacity var(--fast) var(--ease);
+}
+.pt-btn:disabled { opacity: .55; cursor: not-allowed; }
+.pt-btn svg { width: 17px; height: 17px; }
+.pt-btn-primary { background: var(--grad-primary); color: var(--on-primary); box-shadow: var(--sh-primary); }
+.pt-btn-primary:hover:not(:disabled) { background: var(--grad-primary-hover); }
+.pt-btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--border); }
+.pt-btn-ghost:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.pt-btn-link { background: none; color: var(--ink-3); min-height: 44px; margin-top: var(--s2); }
+.pt-btn-link:hover { color: var(--primary); }
+.pt-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+
+.pt-sent { text-align: center; }
+.pt-sent h2 { font: var(--t-h3); color: var(--ink); margin: var(--s4) 0 var(--s3); }
+.pt-sent p { font: var(--t-sm); color: var(--ink-2); margin: 0; line-height: 1.65; }
+.pt-sent-icon {
+  display: inline-grid; place-items: center;
+  width: 56px; height: 56px; border-radius: var(--radius-full);
+  background: var(--primary-soft); color: var(--primary);
+}
+.pt-sent-icon svg { width: 25px; height: 25px; }
+.pt-sent-icon-warn { background: var(--danger-soft, var(--st-cancelled-soft)); color: var(--danger); }
+/* base.css resets list-style away globally — put the markers back here, or
+   these three notes read as one undifferentiated grey paragraph. */
+.pt-sent-notes { text-align: left; margin: var(--s5) 0 0; padding: 0 0 0 var(--s5); list-style: disc outside; }
+.pt-sent-notes li::marker { color: var(--ink-4); }
+.pt-sent-notes li { font: var(--t-xs); color: var(--ink-3); line-height: 1.6; margin-bottom: var(--s2); }
+
+/* ── Spinner + skeleton ───────────────────────────────────────────────── */
+
+.pt-spinner {
+  display: inline-block; width: 15px; height: 15px; flex: none;
+  border: 2px solid currentColor; border-top-color: transparent;
+  border-radius: 50%; animation: pt-spin .7s linear infinite;
+}
+.pt-spinner-lg { width: 28px; height: 28px; border-width: 3px; color: var(--primary); }
+@keyframes pt-spin { to { transform: rotate(360deg); } }
+
+.pt-skel { display: flex; flex-direction: column; gap: var(--s3); }
+.pt-skel-card {
+  height: 128px; border-radius: var(--radius-xl);
+  background: linear-gradient(90deg, var(--surface-3) 25%, var(--bg-sunken) 37%, var(--surface-3) 63%);
+  background-size: 400% 100%;
+  animation: pt-shimmer 1.3s ease-in-out infinite;
+}
+@keyframes pt-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pt-spinner, .pt-skel-card { animation-duration: 0.01ms; animation-iteration-count: 1; }
+  .lp-door { transition: none; }
+}
+
+/* ── Chat entry card (portal dashboards) ──────────────────────────────── */
+
+.pt-chat-cta {
+  display: flex; align-items: center; gap: var(--s4);
+  width: 100%; min-height: 74px; margin-bottom: var(--s6);
+  padding: var(--s4) var(--s5); text-align: left; cursor: pointer;
+  border: 1px solid var(--primary); border-radius: var(--radius-xl);
+  background: var(--primary-soft); font-family: inherit;
+  transition: box-shadow var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+.pt-chat-cta:hover { box-shadow: var(--sh-2); transform: translateY(-1px); }
+.pt-chat-cta:focus-visible { outline: none; box-shadow: var(--ring); }
+.pt-chat-cta-icon {
+  width: 42px; height: 42px; flex: none; display: grid; place-items: center;
+  border-radius: var(--radius-lg); background: var(--surface); color: var(--primary);
+}
+.pt-chat-cta-icon svg { width: 20px; height: 20px; }
+.pt-chat-cta-text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.pt-chat-cta-title { font: var(--t-body-strong); font-size: 16px; color: var(--ink); }
+.pt-chat-cta-sub { font: var(--t-xs); color: var(--ink-2); line-height: 1.45; }
+.pt-chat-cta-go { flex: none; color: var(--primary); display: grid; place-items: center; }
+.pt-chat-cta-go svg { width: 18px; height: 18px; }
+
+/* ── Sample-login block (demo builds only) ────────────────────────────── */
+
+.pt-sample { display: flex; flex-direction: column; align-items: stretch; margin-top: var(--s5); }
+.pt-sample-rule { height: 1px; background: var(--grad-hairline); margin-bottom: var(--s4); }
+.pt-sample-note {
+  font: var(--t-mono-label); text-transform: uppercase; letter-spacing: .1em;
+  color: var(--ink-4); text-align: center; margin: 0;
+}
+
+/* ── Chat: rooms + thread ─────────────────────────────────────────────── */
+
+.ch-boot {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--s3); min-height: 220px; padding: var(--s7) var(--s5); text-align: center;
+  color: var(--ink-3);
+}
+.ch-boot p { font: var(--t-sm); margin: 0; max-width: 42ch; line-height: 1.6; }
+.ch-boot h3 { font: var(--t-h3); color: var(--ink); margin: 0; }
+.ch-boot-error svg { width: 26px; height: 26px; color: var(--danger); }
+
+.ch-wrap {
+  display: grid; grid-template-columns: 290px minmax(0, 1fr);
+  gap: var(--s4); align-items: start;
+  /* Tall enough to feel like a chat, short enough to leave the page usable. */
+  height: min(70vh, 640px);
+}
+
+.ch-rooms {
+  display: flex; flex-direction: column; height: 100%; min-height: 0;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-xl); overflow: hidden;
+}
+.ch-rooms-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--s4) var(--s4) var(--s3); border-bottom: 1px solid var(--line);
+  font: var(--t-mono-label); text-transform: uppercase; letter-spacing: .1em; color: var(--ink-3);
+}
+.ch-count { font-family: var(--font-mono); background: var(--bg-sunken); color: var(--ink-2); border-radius: var(--radius-full); padding: 1px 8px; }
+.ch-room-list { flex: 1; overflow-y: auto; min-height: 0; }
+
+.ch-room {
+  display: flex; flex-direction: column; gap: 3px; width: 100%;
+  padding: var(--s3) var(--s4); text-align: left; cursor: pointer;
+  background: none; border: none; border-bottom: 1px solid var(--line);
+  font-family: inherit;
+}
+.ch-room:hover { background: var(--surface-3); }
+.ch-room.is-active { background: var(--primary-soft); box-shadow: inset 3px 0 0 var(--primary); }
+.ch-room-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
+.ch-room-name { font: var(--t-body-strong); font-size: 14px; color: var(--ink); }
+.ch-room-sub { font: var(--t-xs); color: var(--ink-3); }
+.ch-room-members { font: var(--t-xs); color: var(--ink-4); }
+.ch-unread {
+  flex: none; min-width: 19px; height: 19px; padding: 0 5px;
+  display: grid; place-items: center; border-radius: var(--radius-full);
+  background: var(--primary); color: var(--on-primary);
+  font: var(--t-mono); font-size: 11px;
+}
+
+.ch-thread {
+  display: flex; flex-direction: column; height: 100%; min-height: 0;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-xl); overflow: hidden;
+}
+.ch-head { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); }
+.ch-head-title { font: var(--t-body-strong); font-size: 15px; color: var(--ink); }
+.ch-head-sub { font: var(--t-xs); color: var(--ink-3); margin-top: 2px; }
+.ch-back { display: none; background: none; border: none; cursor: pointer; color: var(--ink-3); padding: var(--s2); }
+.ch-back svg { width: 18px; height: 18px; }
+
+.ch-msgs { flex: 1; overflow-y: auto; min-height: 0; padding: var(--s4); display: flex; flex-direction: column; gap: var(--s4); background: var(--chat-bg, var(--bg)); }
+.ch-msg { max-width: 82%; align-self: flex-start; }
+.ch-msg.is-mine { align-self: flex-end; }
+.ch-msg-meta { display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; margin-bottom: 4px; font: var(--t-xs); color: var(--ink-4); }
+.ch-msg-who { font-weight: 600; color: var(--ink-2); }
+.ch-msg-role { text-transform: uppercase; letter-spacing: .07em; font-size: 10px; }
+.ch-via { background: var(--bg-sunken); border-radius: var(--radius-full); padding: 1px 7px; font-size: 10px; }
+.ch-msg-body {
+  padding: 10px var(--s4); border-radius: var(--radius-lg);
+  background: var(--bubble-in, var(--surface-3)); color: var(--ink);
+  font: var(--t-sm); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.ch-msg.is-mine .ch-msg-meta { justify-content: flex-end; }
+.ch-msg.is-mine .ch-msg-body { background: var(--bubble-out, var(--primary-soft)); }
+
+.ch-typing { min-height: 18px; padding: 0 var(--s4); font: var(--t-xs); color: var(--ink-3); }
+
+.ch-composer { display: flex; gap: var(--s2); align-items: flex-end; padding: var(--s3) var(--s4) var(--s4); border-top: 1px solid var(--line); }
+.ch-composer textarea {
+  flex: 1; resize: none; min-height: 44px; max-height: 140px;
+  padding: 11px var(--s4); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface); color: var(--ink);
+  /* 16px floor keeps iOS Safari from zooming when the composer is focused. */
+  font: var(--t-body); font-size: 16px; font-family: inherit; line-height: 1.45;
+}
+.ch-composer textarea:focus { outline: none; border-color: var(--primary); box-shadow: var(--ring); }
+.ch-send {
+  flex: none; width: 44px; height: 44px; display: grid; place-items: center;
+  border: none; border-radius: var(--radius-lg); cursor: pointer;
+  background: var(--grad-primary); color: var(--on-primary);
+}
+.ch-send:hover { background: var(--grad-primary-hover); }
+.ch-send svg { width: 18px; height: 18px; }
+
+.ch-empty { padding: var(--s7) var(--s5); text-align: center; font: var(--t-sm); color: var(--ink-3); line-height: 1.7; }
+.ch-empty-thread { margin: auto; }
+
+.ch-admin-intro {
+  display: flex; gap: var(--s3); align-items: flex-start;
+  padding: var(--s4); margin-bottom: var(--s4);
+  border: 1px solid var(--line); border-radius: var(--radius-lg);
+  background: var(--surface); font: var(--t-sm); color: var(--ink-2); line-height: 1.6;
+}
+.ch-admin-intro svg { width: 18px; height: 18px; flex: none; color: var(--primary); margin-top: 2px; }
+
+/* Phone: one pane at a time — the list, or the thread with a back arrow. */
+@media (max-width: 760px) {
+  .ch-wrap { grid-template-columns: 1fr; height: min(78vh, 620px); }
+  .ch-wrap[data-view="list"] .ch-thread { display: none; }
+  .ch-wrap[data-view="thread"] .ch-rooms { display: none; }
+  .ch-back { display: grid; place-items: center; }
+  .ch-msg { max-width: 92%; }
+}
+
+/* ── Patient + doctor dashboard extras ────────────────────────────────── */
+
+/* Wide key/value rows: the patient card lists nurse, doctor, address and bill,
+   and the address needs to wrap rather than be clipped like a short value. */
+.pt-kv-wide > div { align-items: flex-start; }
+.pt-kv-wide dt { width: 62px; padding-top: 1px; }
+.pt-kv-wide dd { flex: 1; min-width: 0; line-height: 1.5; }
+
+.pt-session.is-past { opacity: .72; }
+.pt-session.is-past:hover { opacity: 1; }
+
+.pt-docs { display: flex; flex-wrap: wrap; gap: var(--s2); margin: var(--s3) 0 0; }
+.pt-doc {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px var(--s3); border-radius: var(--radius-full);
+  background: var(--surface-3); color: var(--ink-2); font: var(--t-xs);
+}
+.pt-doc svg { width: 13px; height: 13px; color: var(--ink-3); }
+.pt-doc-note { flex-basis: 100%; font: var(--t-xs); color: var(--ink-4); margin: 4px 0 0; }
+
+.pt-chemo-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3);
+  padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line);
+  font: var(--t-sm); color: var(--ink-2);
+}
+.pt-chemo-row:last-of-type { border-bottom: none; }
+.pt-chemo-row strong { color: var(--ink); white-space: nowrap; }
+
+/* The patient's own state words reuse the case-status chips; these two have
+   no case_status equivalent of their own. */
+.pt-chip-registered { background: var(--st-registered-soft); color: var(--st-registered); }
+.pt-chip-offering { background: var(--st-offering-soft); color: var(--st-offering); }
+.pt-chip-archived { background: var(--st-archived-soft); color: var(--st-archived); }
+
+/* The chat-unavailable panel prints a shell command, so keep its newlines. */
+.ch-boot-error p { white-space: pre-line; text-align: left; max-width: 42ch; margin: 0 auto; }
+
+/* A door mid-sign-in: dim it and kill the hover lift so it reads as busy. */
+.lp-door.is-busy { opacity: .6; pointer-events: none; transform: none; }

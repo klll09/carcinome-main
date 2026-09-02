@@ -1,0 +1,417 @@
+/* ============================================================
+   CARCINOME HOME CARE — Design Tokens v2 "Verdant Ledger"
+   Brand re-skin: deep azure → emerald green + terracotta red.
+
+   Type    : Inter (variable UI grotesk) · IBM Plex Mono (codes,
+             timestamps, ledger labels)
+   Themes  : light (default) · dark (true black) · colorful
+             (warm cream washed with red/green) — switched by
+             [data-theme] on <html>, persisted in localStorage.
+   Brand   : emerald #0F8A5F · terracotta #C05A48 · slate ink ·
+             status colors carry the case lifecycle (color =
+             meaning, never decoration)
+   Legacy token names from PN are aliased at the bottom so any
+   PN-pattern markup written by page modules re-themes for free.
+   ============================================================ */
+
+:root {
+  /* ---- Paper (warm off-white) ---- */
+  --bg: #F7F6F2;
+  --bg-2: #F2F0EA;
+  --bg-sunken: #ECE9E1;
+  --surface: #FFFFFF;
+  --surface-2: #FBFAF7;
+  --surface-3: #F4F2EC;
+  --overlay: rgba(11, 24, 19, 0.52);
+
+  /* ---- Ink (slate, never pure black) ---- */
+  --ink: #1C2723;
+  --ink-2: #47564F;
+  --ink-3: #7B867F;
+  --ink-4: #AEB5B0;
+  --ink-inv: #F2F8F5;
+
+  /* ---- Lines ---- */
+  --line: #E4E1D8;
+  --line-2: #D8D4C8;
+  --line-strong: #C5C0B1;
+  --hairline: rgba(28, 39, 35, 0.08);
+
+  /* ---- Night panel (sidebar, toasts, mobile dock) ---- */
+  --panel-deep: #081410;
+  --panel: #0C1D16;
+  --panel-2: #12291F;
+  --panel-3: #193627;
+  --panel-line: rgba(238, 248, 243, 0.09);
+  --panel-line-2: rgba(238, 248, 243, 0.17);
+  --panel-text: #EEF8F2;
+  --panel-text-2: #AECEBE;
+  --panel-text-3: #7CA68F;
+
+  /* ---- Primary: emerald ---- */
+  --primary: #0F8A5F;
+  --primary-2: #0D7852;
+  --primary-hover: #0D7852;
+  --primary-press: #0A6545;
+  --primary-bright: #16A371;
+  --primary-glow: #35C08D;
+  --primary-soft: #E1F4EB;
+  --primary-soft-2: #BFE7D4;
+  --primary-tint: rgba(15, 138, 95, 0.08);
+  --on-primary: #FFFFFF;
+
+  /* ---- Accent: terracotta red (paired brand accent, NOT danger) ---- */
+  --accent: #C05A48;
+  --accent-deep: #A84A3A;
+  --accent-bright: #D66F5C;
+  --accent-soft: #F9E6E0;
+  --accent-tint: rgba(192, 90, 72, 0.12);
+
+  /* ---- Semantic ---- */
+  --ok: #2A7A50;             --ok-soft: #DFEFE5;
+  --warn: #A6740D;           --warn-soft: #F6EACF;
+  --danger: #BC4034;         --danger-soft: #F8E3DF;
+  --info: #2A63A6;           --info-soft: #E2ECF7;
+  --violet: #6A50AC;         --violet-soft: #EAE5F5;
+
+  /* ---- Case lifecycle status colors (color = meaning) ----
+     registered slate · offering amber · assigned blue ·
+     consented cyan · otp_sent indigo · in_care violet ·
+     care_done teal · awaiting_payment orange · paid green ·
+     archived gray · cancelled red — categorical, not brand */
+  --st-registered: #5A6474;        --st-registered-soft: #EDEBE4;
+  --st-offering: #A6740D;          --st-offering-soft: #F8ECCF;
+  --st-assigned: #1E5BB8;          --st-assigned-soft: #E5EDFA;
+  --st-consented: #0E7490;         --st-consented-soft: #D8F0F6;
+  --st-otp-sent: #4338CA;          --st-otp-sent-soft: #E4E2FA;
+  --st-in-care: #6D28D9;           --st-in-care-soft: #EDE6FB;
+  --st-care-done: #0F766E;         --st-care-done-soft: #D5F0ED;
+  --st-awaiting-payment: #C2410C;  --st-awaiting-payment-soft: #FBE7DA;
+  --st-paid: #15803D;              --st-paid-soft: #DCF2E3;
+  --st-archived: #64748B;          --st-archived-soft: #ECEEF2;
+  --st-cancelled: #B91C1C;         --st-cancelled-soft: #FADFDF;
+
+  /* ---- Message-tick colors (WhatsApp delivery ladder) ---- */
+  --tick: #9AA3B2;
+  --tick-read: #2196E0; /* real WhatsApp read-tick blue — semantic, keep */
+  --tick-failed: #BC4034;
+
+  /* ---- Flow Studio canvas ---- */
+  --canvas-bg: #EFF2EE;
+  --canvas-node: var(--surface);
+  --canvas-node-line: #D5DCD6;
+  --canvas-edge: #45514A;
+  --canvas-edge-label: #FFFFFF;
+
+  /* ---- Typography ---- */
+  --font-ui: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, 'Cascadia Mono', monospace;
+
+  --t-display: 800 34px/1.08 var(--font-ui);
+  --t-h1: 700 26px/1.16 var(--font-ui);
+  --t-h2: 700 20px/1.22 var(--font-ui);
+  --t-h3: 600 16.5px/1.3 var(--font-ui);
+  --t-body: 400 14.5px/1.55 var(--font-ui);
+  --t-body-strong: 600 14.5px/1.5 var(--font-ui);
+  --t-sm: 400 13.5px/1.5 var(--font-ui);
+  --t-xs: 500 12px/1.4 var(--font-ui);
+  --t-label: 600 11.5px/1.2 var(--font-ui);
+  /* mono ledger labels — eyebrows, table headers, timestamps, codes */
+  --t-mono: 500 12px/1.4 var(--font-mono);
+  --t-mono-label: 600 10.5px/1.3 var(--font-mono);
+
+  /* ---- Spacing ---- */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px;
+  --s5: 20px; --s6: 24px; --s7: 32px; --s8: 40px;
+  --s9: 48px; --s10: 64px; --s11: 80px;
+
+  /* ---- Radius ---- */
+  --r-xs: 6px; --r-sm: 9px; --r-md: 12px; --r-lg: 16px; --r-xl: 22px; --r-2xl: 30px; --r-pill: 999px;
+
+  /* ---- Elevation ---- */
+  --hi: inset 0 1px 0 rgba(255,255,255,0.55);
+  --hi-dark: inset 0 1px 0 rgba(255,255,255,0.09);
+  --sh-1: 0 1px 2px rgba(28,39,35,0.06), 0 1px 1px rgba(28,39,35,0.04);
+  --sh-2: 0 2px 4px rgba(28,39,35,0.05), 0 8px 20px -4px rgba(28,39,35,0.10);
+  --sh-3: 0 4px 10px rgba(28,39,35,0.06), 0 20px 44px -8px rgba(28,39,35,0.16);
+  --sh-4: 0 8px 20px rgba(28,39,35,0.08), 0 36px 80px -12px rgba(28,39,35,0.24);
+  --sh-float: 0 14px 40px rgba(28,39,35,0.15), 0 4px 12px rgba(28,39,35,0.07);
+  --sh-primary: 0 2px 6px rgba(15,138,95,0.20), 0 12px 26px -6px rgba(15,138,95,0.38);
+  --sh-primary-lg: 0 4px 10px rgba(15,138,95,0.22), 0 20px 44px -8px rgba(15,138,95,0.44);
+  --sh-panel: 0 12px 34px -6px rgba(8,20,16,0.42);
+  --sh-accent: 0 2px 6px rgba(192,90,72,0.20), 0 12px 26px -6px rgba(192,90,72,0.36);
+  --ring: 0 0 0 3px rgba(22,163,113,0.24);
+  --ring-danger: 0 0 0 3px rgba(188,64,52,0.18);
+
+  /* ---- Gradients — material, never decoration ---- */
+  --grad-primary: linear-gradient(180deg, #16A371 0%, #0F8A5F 58%, #0C6F4E 100%);
+  --grad-primary-hover: linear-gradient(180deg, #1BB27D 0%, #12966A 58%, #0E7A56 100%);
+  --grad-accent: linear-gradient(180deg, #D66F5C 0%, #C05A48 100%);
+  --grad-ok: linear-gradient(180deg, #339163 0%, #2A7A50 100%);
+  --grad-ink: linear-gradient(160deg, #12291F 0%, #0C1D16 46%, #081410 100%);
+  --grad-ink-aurora:
+    radial-gradient(90% 150% at 88% -20%, rgba(53,192,141,0.32), transparent 55%),
+    radial-gradient(70% 130% at -12% 115%, rgba(214,111,92,0.15), transparent 58%),
+    linear-gradient(160deg, #12291F 0%, #0C1D16 46%, #081410 100%);
+  --grad-hairline: linear-gradient(135deg, rgba(22,163,113,0.55), rgba(214,111,92,0.32) 55%, rgba(22,163,113,0.25));
+  --grad-sheen: linear-gradient(115deg, transparent 32%, rgba(255,255,255,0.28) 48%, rgba(255,255,255,0.05) 58%, transparent 68%);
+
+  /* ---- WhatsApp chat surface ---- */
+  --chat-bg: #F0EEE6;
+  --bubble-in: #FFFFFF;
+  --bubble-out: #E0F3E9;
+  --bubble-out-line: #C4E4D2;
+
+  /* ---- Motion ---- */
+  --ease: cubic-bezier(0.22, 0.68, 0.16, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --spring: cubic-bezier(0.34, 1.45, 0.5, 1);
+  --snap: cubic-bezier(0.6, 0, 0.2, 1);
+  --fast: 140ms; --base: 240ms; --slow: 420ms; --slower: 640ms;
+
+  /* ---- Layout ---- */
+  --sidebar-w: 258px;
+  --header-h: 64px;
+  --bottomnav-h: 76px; /* floating dock + breathing room */
+  --z-nav: 40; --z-header: 50; --z-drawer: 60; --z-modal-new: 70; --z-toast-new: 80;
+
+  /* ============================================================
+     LEGACY TOKEN ALIASES — PN-pattern markup keeps working.
+     ============================================================ */
+  /* Page-module shorthand tokens (flows/sandbox/flowdocs use these) —
+     they chain to the theme tokens, so all three themes flow through. */
+  --border: var(--line);
+  --ink-soft: var(--ink-2);
+
+  --color-bg-primary:     var(--bg);
+  --color-bg-secondary:   var(--bg-sunken);
+  --color-bg-tertiary:    var(--bg-sunken);
+  --color-bg-elevated:    var(--surface);
+  --color-bg-hover:       var(--surface-3);
+  --color-bg-active:      var(--primary-soft);
+  --color-surface:        var(--surface);
+  --color-surface-hover:  var(--surface-2);
+  --color-surface-border: var(--line);
+
+  --color-primary-50:     var(--primary-soft);
+  --color-primary-100:    var(--primary-soft);
+  --color-primary-200:    var(--primary-soft-2);
+  --color-primary-300:    #8FD4B7;
+  --color-primary-400:    var(--primary-bright);
+  --color-primary-500:    var(--primary);
+  --color-primary-600:    var(--primary);
+  --color-primary-700:    var(--primary-hover);
+  --color-primary-800:    var(--primary-press);
+  --color-primary-900:    var(--primary-press);
+
+  --color-accent-300:     var(--accent-bright);
+  --color-accent-400:     var(--accent);
+  --color-accent-500:     var(--accent);
+  --color-accent-600:     var(--accent-deep);
+
+  --color-success:        var(--ok);     --color-success-bg: var(--ok-soft);
+  --color-warning:        var(--warn);   --color-warning-bg: var(--warn-soft);
+  --color-danger:         var(--danger); --color-danger-bg:  var(--danger-soft);
+  --color-info:           var(--info);   --color-info-bg:    var(--info-soft);
+
+  --color-text-primary:   var(--ink);
+  --color-text-secondary: var(--ink-2);
+  --color-text-muted:     var(--ink-3);
+  --color-text-inverse:   var(--ink-inv);
+
+  --gradient-primary:     var(--grad-primary);
+  --gradient-success:     var(--grad-ok);
+
+  --font-family:          var(--font-ui);
+  --font-xs:    0.75rem;
+  --font-sm:    0.875rem;
+  --font-base:  0.9375rem;
+  --font-md:    1.0625rem;
+  --font-lg:    1.25rem;
+  --font-xl:    1.5rem;
+  --font-2xl:   1.75rem;
+  --font-3xl:   2.125rem;
+  --font-4xl:   2.75rem;
+  --font-weight-normal:   400;
+  --font-weight-medium:   500;
+  --font-weight-semibold: 600;
+  --font-weight-bold:     700;
+  --line-height-tight:    1.16;
+  --line-height-normal:   1.55;
+  --line-height-relaxed:  1.75;
+
+  --space-1:  var(--s1);
+  --space-2:  var(--s2);
+  --space-3:  var(--s3);
+  --space-4:  var(--s4);
+  --space-5:  var(--s5);
+  --space-6:  var(--s6);
+  --space-8:  var(--s7);
+  --space-10: var(--s8);
+  --space-12: var(--s9);
+  --space-16: var(--s10);
+
+  --radius-sm:   var(--r-sm);
+  --radius-md:   var(--r-md);
+  --radius-lg:   var(--r-lg);
+  --radius-xl:   var(--r-xl);
+  --radius-2xl:  var(--r-2xl);
+  --radius-full: var(--r-pill);
+
+  --shadow-sm:   var(--sh-1);
+  --shadow-md:   var(--sh-2);
+  --shadow-lg:   var(--sh-3);
+  --shadow-xl:   var(--sh-4);
+  --shadow-glow: var(--sh-primary);
+  --shadow-glow-lg: var(--sh-primary-lg);
+
+  --transition-fast:   140ms var(--ease);
+  --transition-normal: 240ms var(--ease);
+  --transition-slow:   420ms var(--ease);
+  --transition-spring: 420ms var(--spring);
+
+  --z-dropdown: 30;
+  --z-sidebar:  40;
+  --z-bottom-nav: 40;
+  --z-modal:    70;
+  --z-toast:    80;
+  --z-tooltip:  90;
+
+  --sidebar-width: var(--sidebar-w);
+  --header-height: var(--header-h);
+  --bottom-nav-height: var(--bottomnav-h);
+  --content-max-width: 1400px;
+}
+
+/* ============================================================
+   DARK — the entire site goes black. Surfaces are near-black
+   charcoal, ink flips to soft light, the emerald brand glows a
+   step brighter, soft chips become translucent tints.
+   ============================================================ */
+:root[data-theme="dark"] {
+  --bg: #0B0C0B;
+  --bg-2: #0F110F;
+  --bg-sunken: #070808;
+  --surface: #151816;
+  --surface-2: #1A1E1B;
+  --surface-3: #20241F;
+  --overlay: rgba(0, 0, 0, 0.66);
+
+  --ink: #ECF2EE;
+  --ink-2: #B9C4BD;
+  --ink-3: #86928A;
+  --ink-4: #5A645E;
+  --ink-inv: #101311;
+
+  --line: #262B27;
+  --line-2: #30362F;
+  --line-strong: #3C443C;
+  --hairline: rgba(236, 242, 238, 0.08);
+
+  --panel-deep: #050807;
+  --panel: #0A100D;
+  --panel-2: #111A15;
+  --panel-3: #18241D;
+
+  --primary: #1FA878;
+  --primary-2: #199267;
+  --primary-hover: #26B885;
+  --primary-press: #178257;
+  --primary-bright: #35C08D;
+  --primary-glow: #4CD9A4;
+  --primary-soft: rgba(31, 168, 120, 0.16);
+  --primary-soft-2: rgba(31, 168, 120, 0.28);
+  --primary-tint: rgba(31, 168, 120, 0.10);
+
+  --accent: #D97862;
+  --accent-deep: #C05A48;
+  --accent-bright: #E98D77;
+  --accent-soft: rgba(217, 120, 98, 0.16);
+  --accent-tint: rgba(217, 120, 98, 0.12);
+
+  --ok: #3FA76C;             --ok-soft: rgba(63, 167, 108, 0.15);
+  --warn: #C99A3A;           --warn-soft: rgba(201, 154, 58, 0.14);
+  --danger: #D95F52;         --danger-soft: rgba(217, 95, 82, 0.15);
+  --info: #5A93D6;           --info-soft: rgba(90, 147, 214, 0.14);
+  --violet: #9B84D8;         --violet-soft: rgba(155, 132, 216, 0.15);
+
+  --st-registered: #93A0B0;        --st-registered-soft: rgba(147, 160, 176, 0.14);
+  --st-offering: #D0A045;          --st-offering-soft: rgba(208, 160, 69, 0.14);
+  --st-assigned: #6B9FE8;          --st-assigned-soft: rgba(107, 159, 232, 0.14);
+  --st-consented: #4FB3CE;         --st-consented-soft: rgba(79, 179, 206, 0.14);
+  --st-otp-sent: #8D85E8;          --st-otp-sent-soft: rgba(141, 133, 232, 0.15);
+  --st-in-care: #A97FE8;           --st-in-care-soft: rgba(169, 127, 232, 0.15);
+  --st-care-done: #3FBFB2;         --st-care-done-soft: rgba(63, 191, 178, 0.14);
+  --st-awaiting-payment: #E88A55;  --st-awaiting-payment-soft: rgba(232, 138, 85, 0.14);
+  --st-paid: #4FBF7E;              --st-paid-soft: rgba(79, 191, 126, 0.14);
+  --st-archived: #8B98A8;          --st-archived-soft: rgba(139, 152, 168, 0.13);
+  --st-cancelled: #E06C60;         --st-cancelled-soft: rgba(224, 108, 96, 0.14);
+
+  --canvas-bg: #0E100F;
+  --canvas-node: #191D1A;
+  --canvas-node-line: #2C332D;
+  --canvas-edge: #A8B4AC;
+  --canvas-edge-label: #1E231F;
+
+  --hi: inset 0 1px 0 rgba(255,255,255,0.05);
+  --sh-1: 0 1px 2px rgba(0,0,0,0.5);
+  --sh-2: 0 2px 4px rgba(0,0,0,0.45), 0 8px 20px -4px rgba(0,0,0,0.55);
+  --sh-3: 0 4px 10px rgba(0,0,0,0.5), 0 20px 44px -8px rgba(0,0,0,0.6);
+  --sh-4: 0 8px 20px rgba(0,0,0,0.55), 0 36px 80px -12px rgba(0,0,0,0.7);
+  --sh-float: 0 14px 40px rgba(0,0,0,0.6), 0 4px 12px rgba(0,0,0,0.4);
+  --ring: 0 0 0 3px rgba(53,192,141,0.30);
+
+  --chat-bg: #101211;
+  --bubble-in: #1A1E1B;
+  --bubble-out: #123527;
+  --bubble-out-line: #1C4A36;
+}
+
+/* ============================================================
+   COLORFUL — warm cream washed with the brand pair: green from
+   the top-right, terracotta from the bottom-left. Chips and
+   soft surfaces saturate a step; the Flow Studio canvas itself
+   takes the wash too.
+   ============================================================ */
+:root[data-theme="colorful"] {
+  --bg: #FBF6EF;
+  --bg-2: #F8F1E7;
+  --bg-sunken: #F2E9DC;
+  --surface: #FFFEFB;
+  --surface-2: #FDFAF4;
+  --surface-3: #F8F3E9;
+
+  --primary: #0E9463;
+  --primary-bright: #17B27B;
+  --primary-soft: #D8F3E6;
+  --primary-soft-2: #B2E8D0;
+
+  --accent: #CD5B45;
+  --accent-bright: #E27258;
+  --accent-soft: #FBE3DB;
+
+  --line: #EAD9C8;
+  --line-2: #DFCCB6;
+  --line-strong: #CDB69B;
+
+  --canvas-bg: #F7EFE2;
+  --canvas-node: #FFFEFB;
+  --canvas-node-line: #E3D2BC;
+  --canvas-edge: #6B4F3E;
+
+  --chat-bg: #F7EEDF;
+  --bubble-out: #DDF3E7;
+  --bubble-out-line: #BBE5CE;
+}
+
+/* The colorful wash itself — painted by base.css on <body> via these tokens. */
+:root {
+  --page-wash: none;
+}
+:root[data-theme="colorful"] {
+  --page-wash:
+    radial-gradient(120% 90% at 100% -10%, rgba(23, 178, 123, 0.13), transparent 55%),
+    radial-gradient(110% 80% at -10% 110%, rgba(226, 114, 88, 0.12), transparent 55%),
+    radial-gradient(60% 50% at 50% 50%, rgba(255, 255, 255, 0.4), transparent 70%);
+}

@@ -1,0 +1,22 @@
+{
+  "name": "carcinome-chat-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Socket.IO group-chat server for Carcinome Home Care case rooms.",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs",
+    "demo": "CHAT_STORE=demo node index.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.3"
+  }
+}
