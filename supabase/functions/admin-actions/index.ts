@@ -17,7 +17,7 @@
 //   send_manual_message  { case_id, text }
 //   cancel_case          { case_id, reason }
 //   archive_case         { case_id }
-import { db, getSetting } from '../_shared/db.ts';
+import { db, getServiceKey, getSetting } from '../_shared/db.ts';
 import {
   cancelPendingAvailabilityChecks,
   fmtIST,
@@ -89,7 +89,7 @@ async function docgenCall(
     const res = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/docgen`, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+        authorization: `Bearer ${getServiceKey()}`,
         'content-type': 'application/json',
       },
       body: JSON.stringify({ case_id: caseId, doc }),
@@ -114,7 +114,7 @@ async function actionPreviewDoc(doc: unknown, template: unknown): Promise<Respon
     const res = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/docgen`, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+        authorization: `Bearer ${getServiceKey()}`,
         'content-type': 'application/json',
       },
       body: JSON.stringify({ preview: true, doc: kind, template: template ?? undefined }),

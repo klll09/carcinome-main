@@ -10,7 +10,7 @@
 // module scope; falls back to Helvetica with ₹→"Rs." and Devanagari stripped.
 import { PDFDocument, PDFFont, PDFPage, rgb, StandardFonts } from 'npm:pdf-lib@1.17.1';
 import fontkit from 'npm:@pdf-lib/fontkit@1.1.1';
-import { db, getSetting } from '../_shared/db.ts';
+import { db, getServiceKey, getSetting } from '../_shared/db.ts';
 import { uploadMedia } from '../_shared/wa.ts';
 
 const BUCKET = 'case-docs';
@@ -798,7 +798,12 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ ok: false, error: 'method_not_allowed' }, 405);
 
   // Internal guard
-  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  let serviceKey = '';
+  try {
+    serviceKey = getServiceKey();
+  } catch (e) {
+    console.error('docgen: getServiceKey failed:', e);
+  }
   const cronSecret = Deno.env.get('CRON_SECRET') ?? '';
   const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
   const internal = req.headers.get('x-internal-secret') ?? '';

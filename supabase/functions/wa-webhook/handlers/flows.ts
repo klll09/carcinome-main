@@ -1,7 +1,7 @@
 // wa-webhook/handlers/flows.ts — nfm_reply (WhatsApp Flows) submissions:
 // consent_v1 (patient), completion_v1 (nurse → care_done pipeline), feedback_v1 (patient).
 // flow_token = "<flow_name>:<case_uuid>:<nonce8>" (CONTRACTS §Flow token).
-import { db, getSetting } from '../../_shared/db.ts';
+import { db, getServiceKey, getSetting } from '../../_shared/db.ts';
 import { notifyDoctor } from '../../_shared/doctor.ts';
 import { langFor, pick, type Lang } from '../../_shared/lang.ts';
 import { logEvent } from '../../_shared/log.ts';
@@ -308,7 +308,7 @@ async function docgenCall(
     const res = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/docgen`, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+        authorization: `Bearer ${getServiceKey()}`,
         'content-type': 'application/json',
       },
       body: JSON.stringify({ case_id: caseId, doc }),
