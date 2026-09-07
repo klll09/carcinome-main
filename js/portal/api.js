@@ -27,77 +27,64 @@ export function getPortalSession() {
     if (!raw) return null;
     const s = JSON.parse(raw);
     if (!s?.token || !s?.profile?.role) return null;
-    // An expired token is a zombie: keeping it renders a shell where every
-    // call 401s and there is no obvious way back to the door.
+
     if (s.expires_at && new Date(s.expires_at).getTime() < Date.now()) {
       localStorage.removeItem(SESSION_KEY);
       return null;
     }
+
     return s;
   } catch {
     return null;
   }
 }
 
-/**
- * Any change of identity MUST drop a live chat socket.
- *
- * The socket is authenticated once, at handshake, and connectChat() reuses it
- * while it stays connected. So without this, signing out and back in as
- * somebody else on the same device leaves the socket authenticated as the
- * person who LEFT — and the server, correctly trusting its own handshake,
- * serves their room list and their messages to whoever is now sitting there.
- * On a shared family phone that is a real disclosure, not a cosmetic bug.
- *
- * Imported dynamically because chat.js imports this module; a static import
- * would be a cycle.
- */
 function dropChatSocket() {
-  import('./chat.js').then((m) => m.disconnectChat()).catch(() => { /* chat never loaded */ });
+  import('./chat.js').then((m) => m.disconnectChat()).catch(() => {
+    // Chat may never have been loaded.
+  });
 }
 
 export function setPortalSession(session) {
-  try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch {}
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } catch {}
+
   dropChatSocket();
 }
 
 export function clearPortalSession() {
-  try { localStorage.removeItem(SESSION_KEY); } catch {}
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch {}
+
   dropChatSocket();
 }
 
 // ---- Transport -------------------------------------------------------------
 
-/**
- * POST { action, ...params } to the portal function.
- * Resolves the JSON body on success; throws Error(message) otherwise.
- * A 401 on a session-guarded action clears the stored session, so the caller
- * can simply navigate back to the door.
- */
-/**
- * Where portal calls go. In demo mode the chat server exposes the SAME action
- * protocol at /portal (server/index.mjs), so sample logins work with nothing
- * deployed; in production this is the real edge function.
- */
 export function portalEndpoint() {
-  return CONFIG.SAMPLE_LOGIN ? `${CONFIG.CHAT_URL}/portal` : `${CONFIG.FUNCTIONS_URL}/portal`;
+  return CONFIG.SAMPLE_LOGIN
+    ? `${CONFIG.CHAT_URL}/portal`
+    : `${CONFIG.FUNCTIONS_URL}/portal`;
 }
 
 export async function portalRequest(action, params = {}, { auth = true } = {}) {
   const session = auth ? getPortalSession() : null;
 
-  // A sample session is answered from js/portal/sample.js and never reaches
-  // the network — that is what makes the demo work with nothing running.
-  // Actions sample.js does not stand in for fall through to the real request.
   if (session && isSampleSession(session)) {
     const local = sampleAnswer(action, session);
     if (local !== undefined) return local;
   }
 
   const headers = { 'Content-Type': 'application/json' };
-  if (session?.token) headers.Authorization = `Bearer ${session.token}`;
+
+  if (session?.token) {
+    headers.Authorization = `Bearer ${session.token}`;
+  }
 
   let res;
+
   try {
     res = await fetch(portalEndpoint(), {
       method: 'POST',
@@ -110,22 +97,27 @@ export async function portalRequest(action, params = {}, { auth = true } = {}) {
   }
 
   let body = null;
-  try { body = await res.json(); } catch { /* non-JSON error body */ }
+
+  try {
+    body = await res.json();
+  } catch {
+    // Non-JSON response.
+  }
 
   if (res.status === 401 && auth) {
     clearPortalSession();
-    throw new Error('Your sign-in has expired. Please request a new link.');
+    throw new Error('Your sign-in has expired. Please sign in again.');
   }
+
   if (!res.ok || body?.ok === false) {
     const msg = body?.error || `Request failed (HTTP ${res.status})`;
     console.error('[portal] error:', action, res.status, body);
     throw new Error(friendlyError(msg));
   }
+
   return body;
 }
 
-// Server error codes are terse on purpose (they are also log lines). Families
-// and nurses should not read `link_invalid` on their phone.
 const FRIENDLY = {
   link_invalid: 'That sign-in link has already been used or has expired. Please request a new one.',
   account_unavailable: 'This account is not active right now. Please contact the Carcinome team.',
@@ -142,31 +134,51 @@ function friendlyError(code) {
 
 // ---- Convenience wrappers --------------------------------------------------
 
-export const portalConfig = () => portalRequest('config', {}, { auth: false });
-export const requestLoginLink = (role, phone) => portalRequest('request_link', { role, phone }, { auth: false });
-export const verifyLoginToken = (token) => portalRequest('verify', { token }, { auth: false });
-export const fetchNurseHome = () => portalRequest('nurse_home');
-export const fetchPatientHome = () => portalRequest('patient_home');
-export const fetchDoctorHome = () => portalRequest('doctor_home');
+export const portalConfig = () =>
+  portalRequest('config', {}, { auth: false });
 
-/** The dashboard payload for whichever role is signed in. */
+export const requestLoginLink = (role, phone) =>
+  portalRequest('request_link', { role, phone }, { auth: false });
+
+export const passwordLogin = (role, email, password) =>
+  portalRequest(
+    'password_login',
+    { role, email, password },
+    { auth: false },
+  );
+
+export const verifyLoginToken = (token) =>
+  portalRequest('verify', { token }, { auth: false });
+
+export const fetchNurseHome = () =>
+  portalRequest('nurse_home');
+
+export const fetchPatientHome = () =>
+  portalRequest('patient_home');
+
+export const fetchDoctorHome = () =>
+  portalRequest('doctor_home');
+
 export function fetchHome(role) {
   return portalRequest(`${role}_home`);
 }
 
-/**
- * Sign in as a sample person. Entirely local — no server, no WhatsApp, no
- * network at all — so the three dashboards open with nothing deployed.
- * Guarded by CONFIG.SAMPLE_LOGIN, which must be false in production.
- */
 export async function sampleLogin(role) {
-  if (!CONFIG.SAMPLE_LOGIN) throw new Error('Sample sign-in is not available on this build.');
+  if (!CONFIG.SAMPLE_LOGIN) {
+    throw new Error('Sample sign-in is not available on this build.');
+  }
+
   const session = makeSampleSession(role);
   setPortalSession(session);
   return session.profile;
 }
 
 export async function portalLogout() {
-  try { await portalRequest('logout'); } catch { /* revoking is best-effort */ }
+  try {
+    await portalRequest('logout');
+  } catch {
+    // Revoking is best-effort.
+  }
+
   clearPortalSession();
 }
