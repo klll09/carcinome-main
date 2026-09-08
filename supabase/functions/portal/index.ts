@@ -30,7 +30,8 @@
 //   2. An OPEN OFFER shows the LOCALITY only, never the street address —
 //      the same rule admin-actions applies when it sends nurse_case_offer.
 //      The full address appears only once she is the assigned nurse.
-import { db, getSetting } from '../_shared/db.ts';
+import { db, getServiceKey, getSetting } from '../_shared/db.ts';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 import { normPhone } from '../_shared/phone.ts';
 import { pick, type Lang } from '../_shared/lang.ts';
 import { paramSafe, sendSmart } from '../_shared/wa.ts';
@@ -352,8 +353,14 @@ async function passwordLogin(role: PortalRole, rawEmail: string, rawPassword: st
   const password = String(rawPassword ?? '');
   if (!email || !password) return fail();
 
-  const { data: authData, error: authErr } = await db.auth.signInWithPassword({ email, password });
-  if (authErr || !authData?.user) return fail();
+    const authClient = createClient(Deno.env.get('SUPABASE_URL')!, getServiceKey(), {
+    auth: { persistSession: false },
+  });
+  const { data: authData, error: authErr } = await authClient.auth.signInWithPassword({ email, password });
+  if (authErr || !authData?.user) {
+    console.error(`password_login signIn failed for ${email}:`, authErr?.message, authErr?.status);
+    return fail();
+  }
 
   const table = role === 'nurse' ? 'nurses' : 'doctors';
   const cols = role === 'nurse'
@@ -365,7 +372,15 @@ async function passwordLogin(role: PortalRole, rawEmail: string, rawPassword: st
 
   // deno-lint-ignore no-explicit-any
   const p = person as any;
-  if (!p || p.opted_out || (role === 'nurse' && !p.is_active)) return fail();
+    if (!p || p.opted_out || (role === 'nurse' && !p.is_active)) {
+    console.error(
+      `password_login lookup rejected for ${email} (auth_user_id=${authData.user.id}):`,
+      !p ? 'no matching row (auth_user_id not linked, or wrong table for role)'
+        : p.opted_out ? 'row is opted_out'
+        : 'row is_active is false',
+    );
+    return fail();
+  }
 
   const raw = mintToken();
   const expiresAt = new Date(Date.now() + cfg.session_ttl_days * 24 * HOUR).toISOString();
@@ -897,7 +912,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (!ROLES.includes(role)) return json({ ok: false, error: 'invalid_role' }, 400);
       return await requestLink(role, String(body?.phone ?? ''));
     }
-        if (action === 'password_login') {
+    if (action === 'password_login') {
       const role = String(body?.role ?? '') as PortalRole;
       if (role !== 'nurse' && role !== 'doctor') return json({ ok: false, error: 'invalid_role' }, 400);
       return await passwordLogin(role, String(body?.email ?? ''), String(body?.password ?? ''));
