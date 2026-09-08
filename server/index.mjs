@@ -33,12 +33,21 @@ const RATE_WINDOW_MS = 10_000;
 const RATE_MAX = 20;
 
 // ─── Pick a store ────────────────────────────────────────────────────────────
-const wantDemo = process.env.CHAT_STORE === 'demo' ||
-  !(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+function resolveServiceKey() {
+  const secretKeysRaw = process.env.SUPABASE_SECRET_KEYS;
+  if (secretKeysRaw) {
+    try {
+      const parsed = JSON.parse(secretKeysRaw);
+      const key = parsed.default ?? Object.values(parsed)[0];
+      if (key) return key;
+    } catch (e) { console.error('resolveServiceKey: failed to parse SUPABASE_SECRET_KEYS:', e.message); }
+  }
+  return process.env.SUPABASE_SERVICE_ROLE_KEY || null;
+}
+const serviceKey = resolveServiceKey();
+const wantDemo = process.env.CHAT_STORE === 'demo' || !(process.env.SUPABASE_URL && serviceKey);
 
-const store = wantDemo
-  ? demoStore()
-  : supabaseStore({ url: process.env.SUPABASE_URL, serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY });
+const store = wantDemo ? demoStore() : supabaseStore({ url: process.env.SUPABASE_URL, serviceKey });
 
 if (wantDemo && process.env.CHAT_STORE !== 'demo') {
   console.warn('⚠️  SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — falling back to the DEMO store.');

@@ -209,6 +209,7 @@ export default async function render(container) {
     if (!btn) return;
     if (btn.dataset.action === 'deactivate') requestDeactivate(container, btn.dataset.id);
     if (btn.dataset.action === 'add-first') openAddNurseModal(container);
+    if (btn.dataset.action === 'edit') openEditNurseModal(container, btn.dataset.id);
   });
 
   await refresh(container);
@@ -418,7 +419,11 @@ function nurseRowHtml(n) {
           <span class="knob"></span>
         </label>
       </td>
-      <td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" data-action="edit" data-id="${n.id}" title="Edit ${escapeHtml(n.full_name)}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          Edit
+        </button>
         ${n.is_active ? `
           <button class="btn btn-ghost btn-sm" data-action="deactivate" data-id="${n.id}" title="Deactivate ${escapeHtml(n.full_name)}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg>
@@ -426,6 +431,112 @@ function nurseRowHtml(n) {
           </button>` : `<span class="badge badge-neutral">Inactive</span>`}
       </td>
     </tr>`;
+}
+
+// ============================================================ Edit Nurse modal
+// Mainly exists so the team can set/change a nurse's portal login email
+// without opening the Supabase SQL Editor — everything else here was already
+// editable via the toggles above, but email had no UI path at all.
+function openEditNurseModal(container, id) {
+  const nurse = state.nurses.find((x) => x.id === id);
+  if (!nurse) return;
+
+  const overlay = showModal({
+    title: `Edit ${nurse.full_name}`,
+    size: 'lg',
+    content: `
+      <form id="edit-nurse-form" novalidate>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="en-name">Full name <span class="required">*</span></label>
+            <input class="form-input" id="en-name" type="text" value="${escapeHtml(nurse.full_name || '')}" required />
+            <span class="form-error" data-err="name" hidden></span>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="en-phone">WhatsApp number <span class="required">*</span></label>
+            <input class="form-input" id="en-phone" type="tel" inputmode="numeric" value="${escapeHtml(nurse.phone || '')}" required />
+            <span class="form-error" data-err="phone" hidden></span>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="en-email">Portal login email <span style="text-transform:none;letter-spacing:0">(optional)</span></label>
+            <input class="form-input" id="en-email" type="email" placeholder="nurse@example.com" value="${escapeHtml(nurse.email || '')}" autocomplete="off" />
+            <span class="form-hint">
+              This lets her sign in to the nurse dashboard with a password instead of WhatsApp.
+              You still need to create a matching Supabase Auth user (Authentication → Users)
+              with this exact email — this field only links the two records together.
+            </span>
+            <span class="form-error" data-err="email" hidden></span>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="en-lang">Language</label>
+            <select class="form-select" id="en-lang">
+              <option value="en" ${nurse.language_pref !== 'hi' ? 'selected' : ''}>English</option>
+              <option value="hi" ${nurse.language_pref === 'hi' ? 'selected' : ''}>हिंदी (Hindi)</option>
+            </select>
+          </div>
+        </div>
+      </form>
+    `,
+    footer: `
+      <button class="btn btn-secondary" data-en-cancel type="button">Cancel</button>
+      <button class="btn btn-primary" data-en-save type="button">Save changes</button>
+    `,
+  });
+
+  const $ = (sel) => overlay.querySelector(sel);
+  const setErr = (key, msg) => {
+    const el = overlay.querySelector(`[data-err="${key}"]`);
+    const input = { name: $('#en-name'), phone: $('#en-phone'), email: $('#en-email') }[key];
+    if (msg) { el.textContent = msg; el.hidden = false; input.classList.add('error'); }
+    else { el.hidden = true; input.classList.remove('error'); }
+  };
+
+  $('[data-en-cancel]').addEventListener('click', () => closeModal());
+
+  const saveBtn = $('[data-en-save]');
+  saveBtn.addEventListener('click', async () => {
+    const name = $('#en-name').value.trim();
+    const phoneCheck = validateIndianPhone($('#en-phone').value);
+    const emailRaw = $('#en-email').value.trim().toLowerCase();
+
+    let bad = false;
+    if (!name) { setErr('name', 'Full name is required'); bad = true; } else setErr('name', null);
+    if (!phoneCheck.ok) { setErr('phone', phoneCheck.error); bad = true; } else setErr('phone', null);
+    if (emailRaw && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
+      setErr('email', 'Enter a valid email address'); bad = true;
+    } else setErr('email', null);
+    if (bad) return;
+
+    const patch = {
+      full_name: name,
+      phone: phoneCheck.normalized,
+      email: emailRaw || null,
+      language_pref: $('#en-lang').value === 'hi' ? 'hi' : 'en',
+    };
+
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<div class="spinner" style="margin:0 auto"></div>';
+    const sb = getSupabase();
+    const { error } = await sb.from('nurses').update(patch).eq('id', id);
+    if (error) {
+      if (error.code === '23505' || /duplicate|unique/i.test(error.message || '')) {
+        setErr(/phone/i.test(error.message || '') ? 'phone' : 'email', 'Already in use by another nurse');
+      } else {
+        showToast(error.message || 'Could not save changes', 'error');
+      }
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save changes';
+      return;
+    }
+    Object.assign(nurse, patch);
+    closeModal();
+    showToast(`${name} updated`, 'success');
+    renderRegion(container);
+  });
+
+  requestAnimationFrame(() => $('#en-name')?.focus());
 }
 
 // ============================================================ mutations
@@ -542,6 +653,12 @@ function openAddNurseModal(container) {
           </div>
         </div>
         <div class="form-group">
+          <label class="form-label" for="an-email">Portal login email <span style="text-transform:none;letter-spacing:0">(optional)</span></label>
+          <input class="form-input" id="an-email" type="email" placeholder="nurse@example.com" autocomplete="off" />
+          <span class="form-hint">Lets her sign in to the nurse dashboard with a password. Create a matching Supabase Auth user with this same email afterwards.</span>
+          <span class="form-error" data-err="email" hidden></span>
+        </div>
+        <div class="form-group">
           <label class="form-label" for="an-notes">Notes <span style="text-transform:none;letter-spacing:0">(optional)</span></label>
           <textarea class="form-textarea" id="an-notes" rows="2" placeholder="Availability, locality, anything the team should know"></textarea>
         </div>
@@ -602,14 +719,21 @@ function openAddNurseModal(container) {
 
     const name = $('#an-name').value.trim();
     const phoneCheck = validateIndianPhone($('#an-phone').value);
+    const emailRaw = $('#an-email').value.trim().toLowerCase();
     let bad = false;
     if (!name) { setErr('name', 'Full name is required'); bad = true; }
     if (!phoneCheck.ok) { setErr('phone', phoneCheck.error); bad = true; }
+    if (emailRaw && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
+      const el = overlay.querySelector('[data-err="email"]');
+      el.textContent = 'Enter a valid email address'; el.hidden = false;
+      bad = true;
+    }
     if (bad) return;
 
     const row = {
       full_name: name,
       phone: phoneCheck.normalized,
+      email: emailRaw || null,
       language_pref: $('#an-lang').value === 'hi' ? 'hi' : 'en',
       skills: { tags: skills },
       notes: $('#an-notes').value.trim() || null,

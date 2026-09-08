@@ -44,7 +44,16 @@ const CARE_LABELS = {
 // ════════════════════════════════════════════════════════════════════════════
 
 export function supabaseStore({ url, serviceKey }) {
-  const db = createClient(url, serviceKey, { auth: { persistSession: false } });
+  const fetchWithKeyFix = (input, init) => {
+    if (!serviceKey.startsWith('sb_secret_')) return fetch(input, init);
+    const headers = new Headers(init?.headers);
+    if (headers.get('Authorization') === `Bearer ${serviceKey}`) headers.delete('Authorization');
+    return fetch(input, { ...init, headers });
+  };
+  const db = createClient(url, serviceKey, {
+    auth: { persistSession: false },
+    global: { fetch: fetchWithKeyFix },
+  });
 
   /** Portal bearer → identity. Same table and hashing as the portal function. */
   async function authenticatePortal(token) {

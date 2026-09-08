@@ -341,6 +341,50 @@ async function verifyLink(rawToken: string): Promise<Response> {
   });
 }
 
+// ─── password_login (nurse / doctor staff accounts) ────────────────────────
+async function passwordLogin(role: PortalRole, rawEmail: string, rawPassword: string): Promise<Response> {
+  const cfg = await portalSettings();
+  const fail = () => json({ ok: false, error: 'invalid_credentials' }, 401);
+  if (!cfg.enabled) return json({ ok: false, error: 'portal_disabled' }, 403);
+  if (role !== 'nurse' && role !== 'doctor') return fail();
+
+  const email = String(rawEmail ?? '').trim().toLowerCase();
+  const password = String(rawPassword ?? '');
+  if (!email || !password) return fail();
+
+  const { data: authData, error: authErr } = await db.auth.signInWithPassword({ email, password });
+  if (authErr || !authData?.user) return fail();
+
+  const table = role === 'nurse' ? 'nurses' : 'doctors';
+  const cols = role === 'nurse'
+    ? 'id, full_name, phone, language_pref, opted_out, is_active'
+    : 'id, full_name, phone, language_pref, opted_out';
+  const { data: person, error: lookupErr } = await db
+    .from(table).select(cols).eq('auth_user_id', authData.user.id).maybeSingle();
+  if (lookupErr) console.error('password_login lookup failed:', lookupErr.message);
+
+  // deno-lint-ignore no-explicit-any
+  const p = person as any;
+  if (!p || p.opted_out || (role === 'nurse' && !p.is_active)) return fail();
+
+  const raw = mintToken();
+  const expiresAt = new Date(Date.now() + cfg.session_ttl_days * 24 * HOUR).toISOString();
+  const { error: sessErr } = await db.from('portal_sessions').insert({
+    token_hash: await hashToken(raw), role, person_id: p.id,
+    phone: normPhone(String(p.phone ?? '')), expires_at: expiresAt,
+    last_seen_at: new Date().toISOString(),
+  });
+  if (sessErr) {
+    console.error('password_login session insert failed:', sessErr.message);
+    return json({ ok: false, error: 'session_failed' }, 500);
+  }
+
+  return json({
+    ok: true, session: raw, expires_at: expiresAt,
+    profile: { role, id: p.id, full_name: p.full_name, language_pref: p.language_pref },
+  });
+}
+
 // ─── Session guard ──────────────────────────────────────────────────────────
 
 type Session = { id: string; role: PortalRole; person_id: string; phone: string };
@@ -852,6 +896,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const role = String(body?.role ?? '') as PortalRole;
       if (!ROLES.includes(role)) return json({ ok: false, error: 'invalid_role' }, 400);
       return await requestLink(role, String(body?.phone ?? ''));
+    }
+        if (action === 'password_login') {
+      const role = String(body?.role ?? '') as PortalRole;
+      if (role !== 'nurse' && role !== 'doctor') return json({ ok: false, error: 'invalid_role' }, 400);
+      return await passwordLogin(role, String(body?.email ?? ''), String(body?.password ?? ''));
     }
     if (action === 'sample_login') {
       const role = String(body?.role ?? '') as PortalRole;
