@@ -14,7 +14,7 @@ export const CONFIG = {
   // Socket.IO group-chat server (server/). GitHub Pages cannot host a
   // WebSocket process, so this is its own deployment — point it at the
   // deployed host in production.
-  CHAT_URL: 'http://localhost:3001',
+  CHAT_URL: 'https://carcinome-chat.onrender.com',
 
   // ── DEMO SWITCH ─────────────────────────────────────────────────────────
   // true  → landing page offers one-tap sample logins, always shows the staff
