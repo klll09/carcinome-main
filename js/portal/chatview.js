@@ -19,6 +19,13 @@ import { icon } from '../components/icons.js';
 const ROLE_EMOJI = { patient: '🧑', nurse: '🩺', doctor: '🥼', ops: '🛟', supplier: '📦', poc: '🧭' };
 const ROLE_WORD = { patient: 'Patient', nurse: 'Nurse', doctor: 'Doctor', ops: 'Care team', supplier: 'Supplier', poc: 'POC' };
 
+// Same tone rules as the admin's own case timeline (js/components/caseTimeline.js)
+// — a status change reads as an event chip, not a chat bubble, wherever it's
+// shown, so patients/nurses/doctors see the same "good news / bad news" tint
+// admin already relies on.
+const GOOD_EVENTS = /verified|assigned|consented|paid|completed|care_done|delivered|approved|registered/;
+const BAD_EVENTS = /failed|locked|cancelled|expired|error|nudge|escalat/;
+
 /**
  * Mount the chat into `container`. Returns a cleanup function the host page
  * must call on navigate — otherwise the socket listeners outlive the DOM they
@@ -72,7 +79,7 @@ export async function mountChatView(container, { title = 'Case chats' } = {}) {
   // so an unread conversation is visible without polling.
   offs.push(onMessage((m) => {
     const room = rooms.find((r) => r.id === m.case_id);
-    if (room) { room.last_body = m.body; room.last_at = m.created_at; }
+    if (room) { room.last_body = m.kind === 'event' ? m.label : m.body; room.last_at = m.created_at; }
     if (m.case_id === activeId) {
       appendBubble(m);
     } else if (room) {
@@ -114,7 +121,7 @@ export async function mountChatView(container, { title = 'Case chats' } = {}) {
         </div>
       </header>
       <div class="ch-msgs" id="ch-msgs">${
-        messages.length ? messages.map(bubble).join('') : `<div class="ch-empty">No messages yet. Say hello.</div>`
+        messages.length ? messages.map(renderItem).join('') : `<div class="ch-empty">No messages yet. Say hello.</div>`
       }</div>
       <div class="ch-typing" id="ch-typing"></div>
       <form class="ch-composer" id="ch-composer">
@@ -166,13 +173,29 @@ export async function mountChatView(container, { title = 'Case chats' } = {}) {
     const box = threadEl.querySelector('#ch-msgs');
     if (!box) return;
     box.querySelector('.ch-empty')?.remove();
-    box.insertAdjacentHTML('beforeend', bubble(m));
+    box.insertAdjacentHTML('beforeend', renderItem(m));
     scrollDown();
   }
 
   function scrollDown() {
     const box = threadEl.querySelector('#ch-msgs');
     if (box) box.scrollTop = box.scrollHeight;
+  }
+
+  /** Dispatch to the right renderer — a status change is a chip, never a bubble. */
+  function renderItem(m) {
+    return m.kind === 'event' ? eventChip(m) : bubble(m);
+  }
+
+  function eventChip(e) {
+    const type = String(e.event_type || '');
+    const tone = GOOD_EVENTS.test(type) ? 'evt-good' : BAD_EVENTS.test(type) ? 'evt-bad' : '';
+    const actor = e.actor ? ` · ${escapeHtml(e.actor)}` : '';
+    return `
+      <div class="evt-chip ${tone}">
+        <span>${escapeHtml(e.label)}${actor}</span>
+        <span class="evt-when">${escapeHtml(formatRelativeTime(e.created_at))}</span>
+      </div>`;
   }
 
   function bubble(m) {

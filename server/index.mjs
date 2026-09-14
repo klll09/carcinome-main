@@ -224,6 +224,70 @@ io.on('connection', (socket) => {
   });
 });
 
+// ─── Live push for automated events ─────────────────────────────────────────
+//
+// history() already returns case_events merged with messages, so a fresh
+// room:join always shows the full picture — that part works with nothing
+// below this line. This block is purely so an event that fires WHILE someone
+// already has the chat open (e.g. admin assigns a nurse mid-conversation)
+// appears immediately, instead of needing a refresh to see it.
+//
+// Demo mode has no real Postgres to listen to, so this is a no-op there —
+// demo case_events never change after boot anyway.
+
+// Kept in sync with the same map in store.mjs by hand — small and unlikely to
+// drift, and importing across the two would tangle the demo/real split for
+// no real benefit.
+const EVENT_PHRASE = {
+  registered: 'Case registered',
+  offers_sent: 'Nurse offers sent',
+  offer_yes: 'A nurse accepted the offer',
+  nurse_assigned: 'Nurse assigned',
+  nurse_reassigned: 'Nurse reassigned',
+  consent_sent: 'Consent form sent to the family',
+  consented: 'Consent signed',
+  otp_issued: 'Arrival code sent to the family',
+  otp_verified: 'Nurse arrival verified — session started',
+  care_completed: 'Completion report received',
+  invoice_sent: 'Invoice sent',
+  discharge_sent: 'Discharge summary sent',
+  payment_claimed: 'Family says they have paid',
+  payment_verified: 'Payment verified',
+  feedback_received: 'Feedback received',
+  next_chemo_set: 'Next chemo date set',
+};
+
+if (store.db) {
+  store.db
+    .channel('chat-server-case-events')
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'case_events' },
+      (payload) => {
+        const row = payload.new;
+        if (!row?.case_id) return;
+        io.to(row.case_id).emit('message:new', {
+          id: `evt_${row.id}`,
+          case_id: row.case_id,
+          kind: 'event',
+          event_type: row.event_type,
+          label: EVENT_PHRASE[row.event_type] ?? String(row.event_type ?? '').replaceAll('_', ' '),
+          actor: row.actor && row.actor !== 'system' ? row.actor : null,
+          created_at: row.created_at,
+        });
+      },
+    )
+    .subscribe((status) => {
+      if (status === 'CHANNEL_ERROR') {
+        console.warn('⚠️  case_events realtime subscription failed — automated events will still show on refresh, just not live.');
+        console.warn('   Make sure case_events is added to the supabase_realtime publication:');
+        console.warn('   ALTER PUBLICATION supabase_realtime ADD TABLE case_events;');
+      } else if (status === 'SUBSCRIBED') {
+        console.log('▸ listening for live case_events (automated messages will push instantly)');
+      }
+    });
+}
+
 httpServer.listen(PORT, () => {
   console.log(`▸ Carcinome chat listening on http://localhost:${PORT}`);
   console.log(`▸ origins: ${ORIGINS.join(', ')}`);

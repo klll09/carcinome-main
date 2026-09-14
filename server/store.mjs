@@ -125,25 +125,41 @@ export function supabaseStore({ url, serviceKey }) {
   }
 
   /**
-   * The thread. Inbound rows + web chat only:
-   *  - outbound relay copies would duplicate one human message N times
-   *    (fanOut writes a row per recipient)
-   *  - templates (invoice, OTP prompts) are system noise in a chat pane
+   * The thread. Human conversation (inbound rows + web chat) PLUS the case's
+   * automated event log, merged chronologically and tagged with `kind` so the
+   * client can render them differently — a status change is not a chat
+   * bubble, it is a system note, same as the admin's own case timeline
+   * (js/components/caseTimeline.js) already treats it.
+   *
+   * Deliberately still excludes:
+   *  - outbound relay copies (fanOut writes one row per recipient — showing
+   *    those would repeat one human message 3-4 times)
+   *  - template sends (invoice, OTP prompt) — those ARE represented, just as
+   *    the case_events row that caused them, not as the raw WhatsApp payload.
    */
   async function history(caseId, limit = 100) {
-    const { data, error } = await db
-      .from('messages')
-      .select('id, phone, participant_role, msg_type, body, payload, created_at, direction')
-      .eq('case_id', caseId)
-      .eq('direction', 'in')
-      .in('msg_type', ['web_chat', 'text'])
-      .order('created_at', { ascending: false })
-      .limit(limit);
-    if (error) {
-      console.error('history failed:', error.message);
-      return [];
-    }
-    return (data ?? []).reverse().map((m) => shapeMessage(m, caseId));
+    const [msgRes, evtRes] = await Promise.all([
+      db.from('messages')
+        .select('id, phone, participant_role, msg_type, body, payload, created_at, direction')
+        .eq('case_id', caseId)
+        .eq('direction', 'in')
+        .in('msg_type', ['web_chat', 'text'])
+        .order('created_at', { ascending: false })
+        .limit(limit),
+      db.from('case_events')
+        .select('id, event_type, actor, created_at')
+        .eq('case_id', caseId)
+        .order('created_at', { ascending: false })
+        .limit(limit),
+    ]);
+    if (msgRes.error) console.error('history (messages) failed:', msgRes.error.message);
+    if (evtRes.error) console.error('history (case_events) failed:', evtRes.error.message);
+
+    const messages = (msgRes.data ?? []).map((m) => shapeMessage(m, caseId));
+    const events = (evtRes.data ?? []).map((e) => shapeEvent(e, caseId));
+    return [...messages, ...events]
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      .slice(-limit);
   }
 
   async function append(caseId, identity, text) {
@@ -161,7 +177,7 @@ export function supabaseStore({ url, serviceKey }) {
     return shapeMessage({ ...row, id: data.id, created_at: data.created_at }, caseId);
   }
 
-  return { authenticatePortal, authenticateAdmin, listRooms, canAccess, history, append };
+  return { authenticatePortal, authenticateAdmin, listRooms, canAccess, history, append, db };
 }
 
 function shapeRoom(c) {
@@ -187,11 +203,46 @@ function shapeMessage(m, caseId) {
   return {
     id: String(m.id),
     case_id: caseId,
+    kind: 'message',
     role: m.participant_role || 'ops',
     sender_name: m.payload?.sender_name || fallbackName(m.participant_role),
     body: m.body ?? '',
     created_at: m.created_at,
     via: m.msg_type === 'web_chat' ? 'web' : 'whatsapp',
+  };
+}
+
+// Same human phrasing the portal edge function's doctor_home uses
+// (supabase/functions/portal/index.ts EVENT_PHRASE) — one vocabulary for an
+// event whether you read it in the app, the portal, or here.
+const EVENT_PHRASE = {
+  registered: 'Case registered',
+  offers_sent: 'Nurse offers sent',
+  offer_yes: 'A nurse accepted the offer',
+  nurse_assigned: 'Nurse assigned',
+  nurse_reassigned: 'Nurse reassigned',
+  consent_sent: 'Consent form sent to the family',
+  consented: 'Consent signed',
+  otp_issued: 'Arrival code sent to the family',
+  otp_verified: 'Nurse arrival verified — session started',
+  care_completed: 'Completion report received',
+  invoice_sent: 'Invoice sent',
+  discharge_sent: 'Discharge summary sent',
+  payment_claimed: 'Family says they have paid',
+  payment_verified: 'Payment verified',
+  feedback_received: 'Feedback received',
+  next_chemo_set: 'Next chemo date set',
+};
+
+function shapeEvent(e, caseId) {
+  return {
+    id: `evt_${e.id}`,
+    case_id: caseId,
+    kind: 'event',
+    event_type: e.event_type,
+    label: EVENT_PHRASE[e.event_type] ?? String(e.event_type).replaceAll('_', ' '),
+    actor: e.actor && e.actor !== 'system' ? e.actor : null,
+    created_at: e.created_at,
   };
 }
 
@@ -300,7 +351,7 @@ export function demoStore() {
     history: async (caseId) => messages.filter((m) => m.case_id === caseId),
     append: async (caseId, identity, text) => {
       const m = {
-        id: `demo-${++seq}`, case_id: caseId, role: identity.role,
+        id: `demo-${++seq}`, case_id: caseId, kind: 'message', role: identity.role,
         sender_name: identity.name, body: text,
         created_at: new Date().toISOString(), via: 'web',
       };
@@ -349,7 +400,7 @@ export function demoStore() {
 
   function msg(caseId, role, name, body, minsAgo) {
     return {
-      id: `demo-${caseId}-${role}-${minsAgo}`, case_id: caseId, role,
+      id: `demo-${caseId}-${role}-${minsAgo}`, case_id: caseId, kind: 'message', role,
       sender_name: name, body, created_at: new Date(Date.now() + minsAgo * 60000).toISOString(),
       via: role === 'ops' ? 'web' : 'whatsapp',
     };
