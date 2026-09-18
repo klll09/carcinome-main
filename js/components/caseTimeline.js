@@ -9,7 +9,7 @@
 // ============================================================
 
 import { getSupabase } from '../supabase.js';
-import { escapeHtml, formatActor, formatRelativeTime, formatDateTime } from '../utils/formatters.js';
+import { escapeHtml, capitalize, formatActor, formatTime, formatDateTime } from '../utils/formatters.js';
 import { icon } from './icons.js';
 
 const IST = 'Asia/Kolkata';
