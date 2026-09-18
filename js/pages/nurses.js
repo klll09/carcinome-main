@@ -71,7 +71,7 @@ function showCredentialsModal(name, email, password, created) {
   overlay.querySelector('[data-cred-close]').addEventListener('click', () => closeModal());
 }
 
-async function issueLogin(btn, role, id, name, emailValue, passwordValue) {
+async function issueLogin(btn, role, id, name, emailValue, passwordValue, container) {
   const email = String(emailValue || '').trim().toLowerCase();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     showToast('Enter a valid email first, then save', 'warning');
@@ -88,6 +88,7 @@ async function issueLogin(btn, role, id, name, emailValue, passwordValue) {
   try {
     const res = await adminAction('set_staff_login', { role, id, email, password: password || undefined });
     showCredentialsModal(name, res.email, res.password, res.created);
+    if (container) await refresh(container);
   } catch (err) {
     console.error('[issueLogin] failed:', err);
     showToast(err.message || 'Could not create login', 'error');
@@ -547,8 +548,9 @@ function openEditNurseModal(container, id) {
   };
 
   $('[data-en-cancel]').addEventListener('click', () => closeModal());
+  
   $('#en-issue-login').addEventListener('click', (e) => {
-    issueLogin(e.currentTarget, 'nurse', id, nurse.full_name, $('#en-email').value, $('#en-password').value);
+    issueLogin(e.currentTarget, 'nurse', id, nurse.full_name, $('#en-email').value, $('#en-password').value, container);
   });
 
   const saveBtn = $('[data-en-save]');
