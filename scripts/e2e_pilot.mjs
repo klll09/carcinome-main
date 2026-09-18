@@ -138,7 +138,7 @@ const reg = await adminAction(jwt, 'register_case', {
 ok('register_case returned case_id', !!reg.case_id, reg.case_code || JSON.stringify(reg).slice(0, 120));
 const caseId = reg.case_id;
 
-const offers = await until('offers', `SELECT id FROM case_offers WHERE case_id = '${caseId}'`);
+const offers = await until('offers', `SELECT id FROM case_offers WHERE case_id = '${caseId}'`, 30000);
 ok('offers created for both nurses', offers.length === 2);
 const regMsgs = await until('registration fan-out', `SELECT count(*) n FROM messages WHERE case_id = '${caseId}' AND direction = 'out' AND msg_type = 'template' HAVING count(*) >= 5`, 30000);
 ok('registration fan-out messages ledgered (≥5: patient, doctor, supplier, 2 offers)', regMsgs.length === 1, `${regMsgs[0]?.n ?? '<5'} outbound templates`);

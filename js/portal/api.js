@@ -16,7 +16,7 @@
 import { CONFIG } from '../config.js';
 import { isSampleSession, makeSampleSession, sampleAnswer } from './sample.js';
 
-const SESSION_KEY = 'carcinome_portal_session';
+export const SESSION_KEY = 'carcinome_portal_session';
 
 // ---- Session storage -------------------------------------------------------
 

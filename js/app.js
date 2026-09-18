@@ -12,6 +12,7 @@ import { renderSidebar, bindSidebarSync } from './components/sidebar.js';
 import { showToast } from './components/toast.js';
 import { validateEmail } from './utils/validators.js';
 import { escapeHtml } from './utils/formatters.js';
+import { SESSION_KEY } from './portal/api.js';
 
 const APP_BUILD = CONFIG.VERSION;
 window.APP_BUILD = APP_BUILD;
@@ -414,6 +415,17 @@ async function init() {
   for (const name of PAGES) {
     registerRoute(name, pageHandler(name), { requiresAuth: true });
   }
+
+    // If a sign-in succeeds in ANOTHER tab (e.g. the browser opened the
+  // WhatsApp link in a different tab than the one you're looking at), this
+  // tab notices and follows automatically instead of you having to go hunt
+  // for the right tab yourself. The 'storage' event only ever fires in
+  // OTHER tabs, never the one that made the change, so this can't loop.
+  window.addEventListener('storage', (e) => {
+    if (e.key === SESSION_KEY && e.newValue) {
+      location.reload();
+    }
+  });
 
   // Auth guard — admin routes only; the portal guards itself against
   // portal_sessions, which the admin session knows nothing about.
