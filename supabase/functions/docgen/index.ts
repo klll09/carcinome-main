@@ -1,1302 +1,903 @@
-// portal/index.ts — the patient / nurse / doctor web portals (verify_jwt OFF).
+// docgen/index.ts — invoice + discharge-summary PDFs (CONTRACTS §docgen).
+// Internal-only: Authorization Bearer must equal SERVICE_ROLE_KEY, OR
+// x-internal-secret must equal CRON_SECRET. (verify_jwt is OFF; this guard is the auth.)
 //
-// ═══ WHY THIS FUNCTION EXISTS AT ALL ═══
-// The dashboard SPA queries Postgres directly because RLS is admin-only: the
-// publishable key in js/config.js can read nothing, so shipping it is safe.
-// The portal must NOT weaken that. So the portal browser code never touches
-// Postgres — it calls this function, which holds the service key and scopes
-// every single read to the authenticated person. Portal authorization lives
-// HERE, in one file you can read end to end, instead of in ~20 RLS policies
-// spread over 10 tables where one wrong predicate leaks a cancer patient's
-// medical record. Every query below therefore starts from `s.person_id`.
+// POST { case_id, doc: 'invoice' | 'discharge' } →
+//   { ok: true, path, media_id }   path = Storage key in bucket `case-docs`
+//                                  media_id = WhatsApp media id (null if WA upload failed)
 //
-// ═══ LOGIN ═══
-// Patients use a magic link over WhatsApp. The link is ALWAYS sent to the number already
-// stored on the person's row — never to the number typed into the form — so
-// typing someone else's number sends the link to THEM, not to you.
-//   POST { action: 'request_link', role, phone }  → always { ok: true }
-//   POST { action: 'verify', token }              → { ok, session, expires_at, profile }
-// Nurses and doctors use their linked Supabase Auth email/password account:
-//   POST { action: 'password_login', role, email, password }
-//     → { ok, session, expires_at, profile }
-// Raw tokens are never stored; only sha256(token). Both tables are admin-RLS.
-//
-// ═══ SESSION-GUARDED ACTIONS (Authorization: Bearer <session token>) ═══
-//   me          → the signed-in person + their role
-//   nurse_home  → the nurse dashboard payload (role must be 'nurse')
-//   logout      → revoke this session
-//
-// ═══ PRIVACY INVARIANTS INHERITED FROM THE RELAY ═══
-//   1. Participants never see each other's phone numbers. The relay hub exists
-//      precisely so the patient's number stays hidden from the nurse and vice
-//      versa. No payload below ever contains another person's phone.
-//   2. An OPEN OFFER shows the LOCALITY only, never the street address —
-//      the same rule admin-actions applies when it sends nurse_case_offer.
-//      The full address appears only once she is the assigned nurse.
-import { db, getSetting } from '../_shared/db.ts';
-import { normPhone } from '../_shared/phone.ts';
-import { pick, type Lang } from '../_shared/lang.ts';
-import { paramSafe, sendSmart } from '../_shared/wa.ts';
+// Fonts: Noto Sans (₹) + Noto Sans Devanagari fetched once per isolate and cached in
+// module scope; falls back to Helvetica with ₹→"Rs." and Devanagari stripped.
+import { PDFDocument, PDFFont, PDFPage, rgb, StandardFonts } from 'npm:pdf-lib@1.17.1';
+import fontkit from 'npm:@pdf-lib/fontkit@1.1.1';
+import { db, getServiceKey, getSetting } from '../_shared/db.ts';
+import { uploadMedia } from '../_shared/wa.ts';
 
-const CORS_HEADERS: Record<string, string> = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
-
-const HOUR = 3600_000;
-const IST_OFFSET = 5.5 * HOUR;
+const BUCKET = 'case-docs';
+const PAGE_W = 595.28; // A4
+const PAGE_H = 841.89;
+const MARGIN = 40;
+const BRAND = rgb(0.13, 0.23, 0.5);
+const INK = rgb(0.13, 0.14, 0.17);
+const MUTED = rgb(0.45, 0.47, 0.52);
+const FAINT = rgb(0.93, 0.94, 0.96);
 
 function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json', ...CORS_HEADERS },
-  });
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
-type PortalRole = 'patient' | 'nurse' | 'doctor';
-const ROLES: PortalRole[] = ['patient', 'nurse', 'doctor'];
+/** Constant-time string compare (fixed-length XOR loop over utf8 bytes). */
+function safeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a);
+  const bb = enc.encode(b);
+  let diff = ab.length === bb.length ? 0 : 1;
+  const n = Math.max(ab.length, bb.length, 1);
+  for (let i = 0; i < n; i++) {
+    diff |= (ab[i % (ab.length || 1)] ?? 0) ^ (bb[i % (bb.length || 1)] ?? 0);
+  }
+  return diff === 0;
+}
 
-type PortalSettings = {
-  enabled: boolean;
-  show_admin_login: boolean;
-  sample_login: boolean;
-  app_url: string;
-  wa_number: string;
-  link_ttl_min: number;
-  session_ttl_days: number;
-  max_links_per_hour: number;
+// ─── Fonts (module-scope cache) ─────────────────────────────────────────────
+const FONT_URLS = {
+  regular: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSans/hinted/ttf/NotoSans-Regular.ttf',
+  bold: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSans/hinted/ttf/NotoSans-Bold.ttf',
+  devanagari: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSansDevanagari/hinted/ttf/NotoSansDevanagari-Regular.ttf',
 };
+let fontBytes: { regular: Uint8Array; bold: Uint8Array; devanagari: Uint8Array } | null = null;
+let fontFetchFailed = false;
 
-async function portalSettings(): Promise<PortalSettings> {
-  const v = (await getSetting<Partial<PortalSettings>>('portal')) ?? {};
-  return {
-    enabled: v.enabled !== false,
-    show_admin_login: v.show_admin_login !== false,
-    sample_login: v.sample_login === true,
-    app_url: String(v.app_url ?? '').trim(),
-    wa_number: normPhone(String(v.wa_number ?? '')),
-    link_ttl_min: Number(v.link_ttl_min ?? 15) || 15,
-    session_ttl_days: Number(v.session_ttl_days ?? 30) || 30,
-    max_links_per_hour: Number(v.max_links_per_hour ?? 5) || 5,
-  };
+async function fetchFont(url: string): Promise<Uint8Array> {
+  // Bounded: a slow CDN must degrade to the Helvetica fallback, not stall the
+  // whole completion pipeline behind a hanging font download.
+  const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`font fetch ${res.status}: ${url}`);
+  return new Uint8Array(await res.arrayBuffer());
 }
 
-async function sampleLogin(role: PortalRole): Promise<Response> {
-  const cfg = await portalSettings();
-  if (!cfg.enabled || !cfg.sample_login) {
-    return json({ ok: false, error: 'sample_login_disabled' }, 403);
+async function loadFontBytes(): Promise<typeof fontBytes> {
+  if (fontBytes) return fontBytes;
+  if (fontFetchFailed) return null;
+  try {
+    const [regular, bold, devanagari] = await Promise.all([
+      fetchFont(FONT_URLS.regular),
+      fetchFont(FONT_URLS.bold),
+      fetchFont(FONT_URLS.devanagari),
+    ]);
+    fontBytes = { regular, bold, devanagari };
+    return fontBytes;
+  } catch (e) {
+    console.error('font fetch failed — falling back to Helvetica:', e);
+    fontFetchFailed = true;
+    return null;
+  }
+}
+
+// ─── Text handling ──────────────────────────────────────────────────────────
+const DEVA_RE = /[ऀ-ॿ]/;
+
+/** Keep only characters our fonts can render; harmonize punctuation. */
+function cleanText(s: unknown, fallback: boolean): string {
+  let t = String(s ?? '')
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[–—]/g, '-')
+    .replace(/…/g, '...')
+    .replace(/[\u2000-\u200B\u00A0]/g, ' ')
+    .replace(/[\r\t]/g, ' ');
+  if (fallback) {
+    t = t.replace(/₹\s?/g, 'Rs. ').replace(/[ऀ-ॿ]/g, '');
+    t = t.replace(/[^\x20-\x7E\n]/g, '');
+  } else {
+    // Noto Sans + Noto Sans Devanagari coverage: ASCII, Latin-1, punctuation, ₹, Devanagari.
+    t = t.replace(/[^\x20-\x7E\n\u00A1-\u00FF\u2010-\u2027\u20B9\u0900-\u097F]/g, '');
+  }
+  return t;
+}
+
+type Fonts = { regular: PDFFont; bold: PDFFont; deva: PDFFont | null; fallback: boolean };
+
+function splitRuns(text: string): { text: string; deva: boolean }[] {
+  const runs: { text: string; deva: boolean }[] = [];
+  let cur = '';
+  let curDeva = false;
+  for (const ch of text) {
+    const d = DEVA_RE.test(ch);
+    if (cur === '') {
+      cur = ch;
+      curDeva = d;
+    } else if (d === curDeva || ch === ' ') {
+      cur += ch; // spaces stay with the current run
+    } else {
+      runs.push({ text: cur, deva: curDeva });
+      cur = ch;
+      curDeva = d;
+    }
+  }
+  if (cur) runs.push({ text: cur, deva: curDeva });
+  return runs;
+}
+
+class Painter {
+  constructor(public page: PDFPage, public f: Fonts) {}
+
+  private fontFor(deva: boolean, bold: boolean): PDFFont {
+    if (deva && this.f.deva) return this.f.deva;
+    return bold ? this.f.bold : this.f.regular;
   }
 
-  const map = (await getSetting<Record<string, string>>('sample_people')) ?? {};
-  const personId = map[role];
-  if (!personId) return json({ ok: false, error: 'no_sample_for_role' }, 404);
-
-  const table = role === 'patient' ? 'patients' : role === 'nurse' ? 'nurses' : 'doctors';
-  const phoneCol = role === 'patient' ? 'wa_number' : 'phone';
-
-  const { data: person } = await db
-    .from(table)
-    .select(`id, full_name, language_pref, ${phoneCol}`)
-    .eq('id', personId)
-    .maybeSingle();
-
-  if (!person) return json({ ok: false, error: 'sample_person_missing' }, 404);
-
-  const raw = mintToken();
-  const expiresAt = new Date(Date.now() + cfg.session_ttl_days * 24 * HOUR).toISOString();
-
-  const { error } = await db.from('portal_sessions').insert({
-    token_hash: await hashToken(raw),
-    role,
-    person_id: personId,
-    // deno-lint-ignore no-explicit-any
-    phone: normPhone(String((person as any)[phoneCol] ?? '')),
-    expires_at: expiresAt,
-    last_seen_at: new Date().toISOString(),
-  });
-
-  if (error) {
-    console.error('sample session insert failed:', error.message);
-    return json({ ok: false, error: 'session_failed' }, 500);
+  width(text: string, size: number, bold = false): number {
+    const t = cleanText(text, this.f.fallback);
+    let w = 0;
+    for (const run of splitRuns(t)) {
+      try {
+        w += this.fontFor(run.deva, bold).widthOfTextAtSize(run.text, size);
+      } catch {
+        // unmeasurable run — approximate
+        w += run.text.length * size * 0.55;
+      }
+    }
+    return w;
   }
 
-  return json({
-    ok: true,
-    session: raw,
-    expires_at: expiresAt,
-    profile: {
-      role,
-      id: person.id,
-      full_name: person.full_name,
-      language_pref: person.language_pref,
-    },
-  });
+  /** Draw at (x, y). Returns the x after the drawn text. */
+  text(
+    text: string,
+    x: number,
+    y: number,
+    opts: { size?: number; bold?: boolean; color?: ReturnType<typeof rgb> } = {},
+  ): number {
+    const size = opts.size ?? 10;
+    const color = opts.color ?? INK;
+    const t = cleanText(text, this.f.fallback);
+    let cx = x;
+    for (const run of splitRuns(t)) {
+      const font = this.fontFor(run.deva, opts.bold ?? false);
+      try {
+        this.page.drawText(run.text, { x: cx, y, size, font, color });
+        cx += font.widthOfTextAtSize(run.text, size);
+      } catch (e) {
+        console.error('drawText run failed (skipped):', e);
+      }
+    }
+    return cx;
+  }
+
+  textRight(text: string, xRight: number, y: number, opts: { size?: number; bold?: boolean; color?: ReturnType<typeof rgb> } = {}): void {
+    const w = this.width(text, opts.size ?? 10, opts.bold ?? false);
+    this.text(text, xRight - w, y, opts);
+  }
+
+  wrap(text: string, maxWidth: number, size: number, bold = false, maxLines = 12): string[] {
+    const words = cleanText(text, this.f.fallback).split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let line = '';
+    let idx = 0;
+    while (idx < words.length) {
+      const candidate = line ? `${line} ${words[idx]}` : words[idx];
+      if (!line || this.width(candidate, size, bold) <= maxWidth) {
+        line = candidate; // a single overlong word still gets its own line
+        idx++;
+        continue;
+      }
+      if (lines.length >= maxLines - 1) break; // no room for another line
+      lines.push(line);
+      line = '';
+    }
+    if (idx < words.length) {
+      // out of lines with words remaining — ellipsize the last line to fit
+      let t = line;
+      while (t.includes(' ') && this.width(`${t}...`, size, bold) > maxWidth) {
+        t = t.slice(0, t.lastIndexOf(' '));
+      }
+      lines.push(`${t}...`);
+    } else if (line) {
+      lines.push(line);
+    }
+    return lines.length ? lines : [''];
+  }
+
+  rule(x1: number, y: number, x2: number, color = FAINT, thickness = 1): void {
+    this.page.drawLine({ start: { x: x1, y }, end: { x: x2, y }, color, thickness });
+  }
+
+  rect(x: number, y: number, w: number, h: number, color: ReturnType<typeof rgb>, borderOnly = false): void {
+    if (borderOnly) {
+      this.page.drawRectangle({ x, y, width: w, height: h, borderColor: color, borderWidth: 1 });
+    } else {
+      this.page.drawRectangle({ x, y, width: w, height: h, color });
+    }
+  }
 }
 
-function mintToken(): string {
-  const b = new Uint8Array(32);
-  crypto.getRandomValues(b);
-  return btoa(String.fromCharCode(...b))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
-
-async function hashToken(raw: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
-  return Array.from(
-    new Uint8Array(digest),
-    (b) => b.toString(16).padStart(2, '0'),
-  ).join('');
-}
-
-type Person = {
-  id: string;
-  full_name: string;
-  phone: string;
-  language_pref: string;
-};
-
-type EmailPerson = Person & {
-  auth_user_id: string;
-};
-
-function getPublishableKey(): string {
-  const raw = Deno.env.get('SUPABASE_PUBLISHABLE_KEYS');
-
-  if (raw) {
+async function makeDoc(): Promise<{ pdf: PDFDocument; page: PDFPage; painter: Painter }> {
+  const pdf = await PDFDocument.create();
+  const bytes = await loadFontBytes();
+  let fonts: Fonts;
+  if (bytes) {
     try {
-      const keys = JSON.parse(raw) as Record<string, string>;
-      const key = keys.default ?? Object.values(keys)[0];
-      if (key) return key;
+      // deno-lint-ignore no-explicit-any
+      pdf.registerFontkit(fontkit as any);
+      const [regular, bold, deva] = await Promise.all([
+        pdf.embedFont(bytes.regular, { subset: true }),
+        pdf.embedFont(bytes.bold, { subset: true }),
+        pdf.embedFont(bytes.devanagari, { subset: true }),
+      ]);
+      fonts = { regular, bold, deva, fallback: false };
     } catch (e) {
-      console.error('getPublishableKey: failed to parse SUPABASE_PUBLISHABLE_KEYS:', e);
-    }
-  }
-
-  const legacy = Deno.env.get('SUPABASE_ANON_KEY');
-  if (legacy) return legacy;
-
-  throw new Error(
-    'getPublishableKey: no SUPABASE_PUBLISHABLE_KEYS or SUPABASE_ANON_KEY available',
-  );
-}
-
-async function issueSession(role: PortalRole, person: Person): Promise<Response> {
-  const cfg = await portalSettings();
-  const sessionRaw = mintToken();
-  const expiresAt = new Date(
-    Date.now() + cfg.session_ttl_days * 24 * HOUR,
-  ).toISOString();
-
-  const { error } = await db.from('portal_sessions').insert({
-    token_hash: await hashToken(sessionRaw),
-    role,
-    person_id: person.id,
-    phone: person.phone,
-    expires_at: expiresAt,
-    last_seen_at: new Date().toISOString(),
-  });
-
-  if (error) {
-    console.error('session insert failed:', error.message);
-    return json({ ok: false, error: 'session_failed' }, 500);
-  }
-
-  return json({
-    ok: true,
-    session: sessionRaw,
-    expires_at: expiresAt,
-    profile: {
-      role,
-      id: person.id,
-      full_name: person.full_name,
-      language_pref: person.language_pref,
-    },
-  });
-}
-
-async function findPerson(
-  role: PortalRole,
-  typedPhone: string,
-): Promise<Person | null> {
-  const p = normPhone(typedPhone);
-  if (!p || p.length < 11) return null;
-
-  try {
-    if (role === 'patient') {
-      const { data } = await db
-        .from('patients')
-        .select('id, full_name, wa_number, phone, language_pref, opted_out')
-        .or(`wa_number.eq.${p},phone.eq.${p}`)
-        .limit(1);
-
-      const row = data?.[0];
-      if (!row || row.opted_out) return null;
-
-      const waPhone = normPhone(row.wa_number);
-      if (!waPhone) return null;
-
-      return {
-        id: row.id,
-        full_name: row.full_name,
-        phone: waPhone,
-        language_pref: row.language_pref,
+      console.error('custom font embed failed — Helvetica fallback:', e);
+      fonts = {
+        regular: await pdf.embedFont(StandardFonts.Helvetica),
+        bold: await pdf.embedFont(StandardFonts.HelveticaBold),
+        deva: null,
+        fallback: true,
       };
     }
-
-    if (role === 'nurse') {
-      const { data } = await db
-        .from('nurses')
-        .select('id, full_name, phone, language_pref, opted_out, is_active')
-        .eq('phone', p)
-        .maybeSingle();
-
-      if (!data || data.opted_out || !data.is_active) return null;
-
-      return {
-        id: data.id,
-        full_name: data.full_name,
-        phone: normPhone(data.phone),
-        language_pref: data.language_pref,
-      };
-    }
-
-    const { data } = await db
-      .from('doctors')
-      .select('id, full_name, phone, language_pref, opted_out')
-      .eq('phone', p)
-      .maybeSingle();
-
-    if (!data || data.opted_out) return null;
-
-    return {
-      id: data.id,
-      full_name: data.full_name,
-      phone: normPhone(data.phone),
-      language_pref: data.language_pref,
+  } else {
+    fonts = {
+      regular: await pdf.embedFont(StandardFonts.Helvetica),
+      bold: await pdf.embedFont(StandardFonts.HelveticaBold),
+      deva: null,
+      fallback: true,
     };
-  } catch (e) {
-    console.error(`findPerson(${role}) exception:`, e);
-    return null;
   }
+  const page = pdf.addPage([PAGE_W, PAGE_H]);
+  return { pdf, page, painter: new Painter(page, fonts) };
 }
 
-async function findEmailPerson(
-  role: PortalRole,
-  authUserId: string,
-  email: string,
-): Promise<EmailPerson | null> {
-  if (role !== 'nurse' && role !== 'doctor') return null;
-
-  const table = role === 'nurse' ? 'nurses' : 'doctors';
-
+// ─── Shared bits ────────────────────────────────────────────────────────────
+function fmtIST(ts: string | null | undefined, withTime = true): string {
+  if (!ts) return '—';
   try {
-    let query = db
-      .from(table)
-      .select('id, full_name, phone, language_pref, email, auth_user_id, opted_out')
-      .eq('auth_user_id', authUserId)
-      .eq('email', email)
-      .maybeSingle();
-
-    if (role === 'nurse') query = query.eq('is_active', true);
-
-    const { data } = await query;
-
-    if (!data || data.opted_out || !data.auth_user_id) return null;
-
-    return {
-      id: data.id,
-      full_name: data.full_name,
-      phone: normPhone(data.phone),
-      language_pref: data.language_pref,
-      auth_user_id: data.auth_user_id,
-    };
-  } catch (e) {
-    console.error(`findEmailPerson(${role}) exception:`, e);
-    return null;
-  }
-}
-
-async function passwordLogin(
-  role: PortalRole,
-  rawEmail: string,
-  password: string,
-): Promise<Response> {
-  if (role !== 'nurse' && role !== 'doctor') {
-    return json({ ok: false, error: 'invalid_role' }, 400);
-  }
-
-  const email = String(rawEmail ?? '').trim().toLowerCase();
-  const generic = () => json({ ok: false, error: 'invalid_credentials' }, 401);
-
-  if (
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
-    !password ||
-    password.length > 1024
-  ) {
-    return generic();
-  }
-
-  let authRes: Response;
-
-  try {
-    authRes = await fetch(
-      `${Deno.env.get('SUPABASE_URL')}/auth/v1/token?grant_type=password`,
-      {
-        method: 'POST',
-        headers: {
-          apikey: getPublishableKey(),
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      },
-    );
-  } catch (e) {
-    console.error('password_login: GoTrue request failed:', e);
-    return json({ ok: false, error: 'login_unavailable' }, 503);
-  }
-
-  if (!authRes.ok) return generic();
-
-  // deno-lint-ignore no-explicit-any
-  const auth = await authRes.json().catch(() => null) as any;
-  const authUserId = String(auth?.user?.id ?? '');
-
-  if (!authUserId) return generic();
-
-  const person = await findEmailPerson(role, authUserId, email);
-  if (!person) return generic();
-
-  return await issueSession(role, person);
-}
-
-async function requestLink(
-  role: PortalRole,
-  typedPhone: string,
-): Promise<Response> {
-  const cfg = await portalSettings();
-  const generic = json({ ok: true });
-
-  if (!cfg.enabled) return generic;
-
-  if (!cfg.app_url) {
-    console.error('portal.app_url is not set — cannot build a login link');
-    return generic;
-  }
-
-  const person = await findPerson(role, typedPhone);
-
-  if (!person) {
-    console.log(`request_link: no ${role} for the typed number — answering generically`);
-    return generic;
-  }
-
-  try {
-    const { count } = await db
-      .from('portal_login_tokens')
-      .select('id', { count: 'exact', head: true })
-      .eq('phone', person.phone)
-      .gt('created_at', new Date(Date.now() - HOUR).toISOString());
-
-    if ((count ?? 0) >= cfg.max_links_per_hour) {
-      console.warn(`request_link: rate limit hit for ${person.phone}`);
-      return generic;
-    }
-  } catch (e) {
-    console.error('request_link rate-limit check failed:', e);
-  }
-
-  const raw = mintToken();
-  const expiresAt = new Date(
-    Date.now() + cfg.link_ttl_min * 60_000,
-  ).toISOString();
-
-  const { error } = await db.from('portal_login_tokens').insert({
-    token_hash: await hashToken(raw),
-    role,
-    person_id: person.id,
-    phone: person.phone,
-    expires_at: expiresAt,
-  });
-
-  if (error) {
-    console.error('login token insert failed:', error.message);
-    return generic;
-  }
-
-  const url = `${cfg.app_url.replace(/\/+$/, '/')}#portal/enter?t=${raw}`;
-  const lang: Lang = person.language_pref === 'hi' ? 'hi' : 'en';
-
-  const body = pick(lang, {
-    en: `Your Carcinome Home Care sign-in link is below. It works once and expires in ${cfg.link_ttl_min} minutes.\n\n${url}\n\nIf you did not ask to sign in, ignore this message — nobody can use the link without this phone.`,
-    hi: `कार्सिनोम होम केयर में साइन इन करने का आपका लिंक नीचे है। यह एक बार काम करेगा और ${cfg.link_ttl_min} मिनट में समाप्त हो जाएगा।\n\n${url}\n\nयदि आपने साइन इन का अनुरोध नहीं किया है, तो इस संदेश को अनदेखा करें — इस फ़ोन के बिना कोई भी इस लिंक का उपयोग नहीं कर सकता।`,
-  });
-
-  const r = await sendSmart(person.phone, body, {
-    name: 'care_update',
-    lang,
-    params: [
-      'Carcinome Team',
-      paramSafe(`Sign-in link (valid ${cfg.link_ttl_min} min): ${url}`, 280),
-    ],
-  });
-
-  if (!r.ok) {
-    console.error(`request_link: WhatsApp send failed for ${person.phone}:`, r.error);
-  }
-
-  db
-    .from('portal_login_tokens')
-    .delete()
-    .lt('expires_at', new Date(Date.now() - 24 * HOUR).toISOString())
-    .then(({ error: delErr }) => {
-      if (delErr) console.error('token cleanup failed:', delErr.message);
+    return new Date(ts).toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      ...(withTime ? { hour: 'numeric', minute: '2-digit', hour12: true } : {}),
     });
-
-  return generic;
-}
-
-async function verifyLink(rawToken: string): Promise<Response> {
-  const cfg = await portalSettings();
-
-  if (!cfg.enabled) {
-    return json({ ok: false, error: 'portal_disabled' }, 403);
-  }
-
-  const raw = String(rawToken ?? '').trim();
-  if (!raw) return json({ ok: false, error: 'missing_token' }, 400);
-
-  const hash = await hashToken(raw);
-
-  const { data: tok, error } = await db
-    .from('portal_login_tokens')
-    .select('id, role, person_id, phone, expires_at, used_at')
-    .eq('token_hash', hash)
-    .maybeSingle();
-
-  if (error) {
-    console.error('token lookup failed:', error.message);
-    return json({ ok: false, error: 'lookup_failed' }, 500);
-  }
-
-  if (
-    !tok ||
-    tok.used_at ||
-    new Date(tok.expires_at).getTime() < Date.now()
-  ) {
-    return json({ ok: false, error: 'link_invalid' }, 401);
-  }
-
-  const { data: burned } = await db
-    .from('portal_login_tokens')
-    .update({ used_at: new Date().toISOString() })
-    .eq('id', tok.id)
-    .is('used_at', null)
-    .select('id');
-
-  if ((burned ?? []).length === 0) {
-    return json({ ok: false, error: 'link_invalid' }, 401);
-  }
-
-  const person = await findPerson(tok.role as PortalRole, tok.phone);
-
-  if (!person || person.id !== tok.person_id) {
-    return json({ ok: false, error: 'account_unavailable' }, 403);
-  }
-
-  return await issueSession(tok.role as PortalRole, person);
-}
-
-type Session = {
-  id: string;
-  role: PortalRole;
-  person_id: string;
-  phone: string;
-};
-
-async function loadSession(req: Request): Promise<Session | null> {
-  const raw = (req.headers.get('authorization') ?? '')
-    .replace(/^Bearer\s+/i, '')
-    .trim();
-
-  if (!raw) return null;
-
-  try {
-    const { data } = await db
-      .from('portal_sessions')
-      .select('id, role, person_id, phone, expires_at, revoked_at')
-      .eq('token_hash', await hashToken(raw))
-      .maybeSingle();
-
-    if (
-      !data ||
-      data.revoked_at ||
-      new Date(data.expires_at).getTime() < Date.now()
-    ) {
-      return null;
-    }
-
-    db
-      .from('portal_sessions')
-      .update({ last_seen_at: new Date().toISOString() })
-      .eq('id', data.id)
-      .then(({ error }) => {
-        if (error) console.error('last_seen_at update failed:', error.message);
-      });
-
-    return {
-      id: data.id,
-      role: data.role as PortalRole,
-      person_id: data.person_id,
-      phone: data.phone,
-    };
-  } catch (e) {
-    console.error('loadSession exception:', e);
-    return null;
+  } catch {
+    return String(ts);
   }
 }
 
-function istDayRange(offsetDays = 0): { start: string; end: string } {
-  const nowIst = new Date(Date.now() + IST_OFFSET);
-  const startUtc =
-    Date.UTC(
-      nowIst.getUTCFullYear(),
-      nowIst.getUTCMonth(),
-      nowIst.getUTCDate() + offsetDays,
-    ) - IST_OFFSET;
-
-  return {
-    start: new Date(startUtc).toISOString(),
-    end: new Date(startUtc + 24 * HOUR).toISOString(),
-  };
+function money(n: number): string {
+  return `₹${Number(n ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-const CARE_LABELS_FALLBACK: Record<string, string> = {
+const CARE_LABELS: Record<string, string> = {
   one_time_infusion: 'One-time infusion',
   chemo_infusion: 'Chemotherapy infusion',
   nursing_12h: '12-hour nursing',
   nursing_24h: '24-hour nursing',
 };
-
-const LINE_LABELS_FALLBACK: Record<string, string> = {
+const LINE_LABELS: Record<string, string> = {
   chemo_port: 'Chemo Port',
   picc: 'PICC Line',
   peripheral: 'Peripheral Line',
   other: 'Other',
 };
 
-async function allLabels(): Promise<{
-  care: Record<string, string>;
-  line: Record<string, string>;
-}> {
-  const care = (await getSetting<Record<string, string>>('care_type_labels')) ?? {};
-  const line = (await getSetting<Record<string, string>>('line_type_labels')) ?? {};
-
-  return {
-    care: { ...CARE_LABELS_FALLBACK, ...care },
-    line: { ...LINE_LABELS_FALLBACK, ...line },
-  };
+async function labels(): Promise<{ care: Record<string, string>; line: Record<string, string> }> {
+  const care = (await getSetting<Record<string, string>>('care_type_labels')) ?? CARE_LABELS;
+  const line = (await getSetting<Record<string, string>>('line_type_labels')) ?? LINE_LABELS;
+  return { care: { ...CARE_LABELS, ...care }, line: { ...LINE_LABELS, ...line } };
 }
 
-function areaOf(
-  p: { locality?: string | null; pincode?: string | null } | null,
-  address?: string | null,
-): string {
-  if (p?.locality) {
-    return p.pincode ? `${p.locality}, ${p.pincode}` : p.locality;
-  }
+// ─── Document templates (editable from the dashboard Flow Studio) ───────────
+// Stored in settings as doc_template_invoice / doc_template_discharge; every
+// string may carry {{placeholders}} resolved against the doc's data map. The
+// defaults below mirror the original hardcoded layout exactly, and any missing
+// key in a stored template falls back to them — a half-edited template can
+// never blank out a document.
 
-  const parts = String(address ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+export type TplCell = { label: string; value: string; skip_if_empty?: boolean };
+export type TplSection = { title: string; rows: TplCell[][] };
 
-  if (parts.length >= 2) return parts.slice(-2).join(', ');
-
-  return parts[0] ?? 'Area shared on assignment';
-}
-
-function nurseNextStep(
-  status: string,
-  consented: boolean,
-): { action: string; tone: 'wait' | 'do' | 'done' } {
-  switch (status) {
-    case 'assigned':
-      return consented
-        ? {
-          action: 'Confirm you are going when we ask, then travel to the address.',
-          tone: 'wait',
-        }
-        : {
-          action: 'Waiting on the family to sign the consent form. Nothing for you yet.',
-          tone: 'wait',
-        };
-
-    case 'consented':
-      return {
-        action: 'Consent is signed. Message us when you reach the patient’s home.',
-        tone: 'wait',
-      };
-
-    case 'otp_sent':
-      return {
-        action: 'Ask the family for the 6-digit arrival number and send it on WhatsApp.',
-        tone: 'do',
-      };
-
-    case 'in_care':
-      return {
-        action: 'Session is running. Submit the completion report when care is done.',
-        tone: 'do',
-      };
-
-    case 'care_done':
-    case 'awaiting_payment':
-    case 'paid':
-      return {
-        action: 'Report received. Nothing further needed from you.',
-        tone: 'done',
-      };
-
-    default:
-      return {
-        action: 'No action needed right now.',
-        tone: 'wait',
-      };
-  }
-}
-
-const NURSE_CASE_SELECT =
-  'id, case_code, status, care_type, line_type, scheduled_at, address, equipment_notes, ' +
-  'consented_at, arrival_verified_at, ' +
-  'patients:patient_id(full_name, cancer_type, locality, pincode, language_pref)';
-
-async function nurseHome(s: Session): Promise<Response> {
-  const { data: nurse } = await db
-    .from('nurses')
-    .select('id, full_name, phone, language_pref, is_eligible, is_active')
-    .eq('id', s.person_id)
-    .maybeSingle();
-
-  if (!nurse || !nurse.is_active) {
-    return json({ ok: false, error: 'account_unavailable' }, 403);
-  }
-
-  const labels = await allLabels();
-  const today = istDayRange();
-  const weekEnd = istDayRange(7).start;
-
-  const { data: assigned } = await db
-    .from('cases')
-    .select(NURSE_CASE_SELECT)
-    .eq('assigned_nurse_id', nurse.id)
-    .in('status', [
-      'assigned',
-      'consented',
-      'otp_sent',
-      'in_care',
-      'care_done',
-      'awaiting_payment',
-    ])
-    .order('scheduled_at', { ascending: true })
-    .limit(60);
-
-  // deno-lint-ignore no-explicit-any
-  const shapeAssigned = (c: any) => {
-    const p = c.patients as {
-      full_name?: string;
-      cancer_type?: string;
-      locality?: string;
-      pincode?: string;
-    } | null;
-
-    return {
-      id: c.id,
-      case_code: c.case_code,
-      status: c.status,
-      care_label: labels.care[c.care_type] ?? c.care_type,
-      line_label: labels.line[c.line_type] ?? c.line_type,
-      scheduled_at: c.scheduled_at,
-      address: c.address,
-      equipment_notes: c.equipment_notes,
-      patient_name: p?.full_name ?? 'Patient',
-      cancer_type: p?.cancer_type ?? null,
-      consented: !!c.consented_at,
-      arrival_verified_at: c.arrival_verified_at,
-      next_step: nurseNextStep(c.status, !!c.consented_at),
-    };
-  };
-
-  const assignedRows = (assigned ?? []).map(shapeAssigned);
-
-  const todayRows = assignedRows.filter(
-    (c) => c.scheduled_at >= today.start && c.scheduled_at < today.end,
-  );
-
-  const upcomingRows = assignedRows.filter(
-    (c) => c.scheduled_at >= today.end && c.scheduled_at < weekEnd,
-  );
-
-  const overdueRows = assignedRows.filter(
-    (c) =>
-      c.scheduled_at < today.start &&
-      !['care_done', 'awaiting_payment', 'paid'].includes(c.status),
-  );
-
-  const { data: offers } = await db
-    .from('case_offers')
-    .select(
-      'id, response, sent_at, ' +
-        'cases!inner(id, case_code, status, care_type, line_type, scheduled_at, address, ' +
-        'patients:patient_id(locality, pincode))',
-    )
-    .eq('nurse_id', nurse.id)
-    .eq('response', 'pending')
-    .eq('cases.status', 'offering')
-    .order('sent_at', { ascending: false })
-    .limit(25);
-
-  // deno-lint-ignore no-explicit-any
-  const offerRows = (offers ?? []).map((o: any) => {
-    const c = o.cases;
-
-    return {
-      offer_id: o.id,
-      case_id: c.id,
-      case_code: c.case_code,
-      care_label: labels.care[c.care_type] ?? c.care_type,
-      line_label: labels.line[c.line_type] ?? c.line_type,
-      scheduled_at: c.scheduled_at,
-      area: areaOf(c.patients, c.address),
-      sent_at: o.sent_at,
-    };
-  });
-
-  const { data: checks } = await db
-    .from('availability_checks')
-    .select('id, case_id, kind, deadline_at, sent_at, cases:case_id(case_code, scheduled_at)')
-    .eq('nurse_id', nurse.id)
-    .eq('response', 'pending')
-    .order('sent_at', { ascending: false })
-    .limit(5);
-
-  // deno-lint-ignore no-explicit-any
-  const checkRows = (checks ?? []).map((r: any) => ({
-    id: r.id,
-    case_id: r.case_id,
-    case_code: r.cases?.case_code ?? '',
-    kind: r.kind,
-    deadline_at: r.deadline_at,
-    scheduled_at: r.cases?.scheduled_at ?? null,
-  }));
-
-  const { data: otp } = await db
-    .from('otps')
-    .select('case_id, expires_at, attempts, cases:case_id(case_code)')
-    .eq('expected_from_phone', s.phone)
-    .eq('status', 'active')
-    .gt('expires_at', new Date().toISOString())
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const arrival = otp
-    // deno-lint-ignore no-explicit-any
-    ? {
-      case_id: otp.case_id,
-      case_code: (otp.cases as any)?.case_code ?? '',
-      expires_at: otp.expires_at,
-      attempts: otp.attempts,
-    }
-    : null;
-
-  const since30d = new Date(Date.now() - 30 * 24 * HOUR).toISOString();
-
-  const [
-    { count: completed30d },
-    { count: offersTotal },
-    { count: offersYes },
-  ] = await Promise.all([
-    db
-      .from('cases')
-      .select('id', { count: 'exact', head: true })
-      .eq('assigned_nurse_id', nurse.id)
-      .in('status', ['care_done', 'awaiting_payment', 'paid', 'archived'])
-      .gt('completed_at', since30d),
-
-    db
-      .from('case_offers')
-      .select('id', { count: 'exact', head: true })
-      .eq('nurse_id', nurse.id),
-
-    db
-      .from('case_offers')
-      .select('id', { count: 'exact', head: true })
-      .eq('nurse_id', nurse.id)
-      .eq('response', 'yes'),
-  ]);
-
-  return json({
-    ok: true,
-    wa_number: (await portalSettings()).wa_number,
-    nurse: {
-      id: nurse.id,
-      full_name: nurse.full_name,
-      language_pref: nurse.language_pref,
-      is_eligible: nurse.is_eligible,
-    },
-    today: todayRows,
-    overdue: overdueRows,
-    upcoming: upcomingRows,
-    offers: offerRows,
-    availability: checkRows,
-    arrival,
-    stats: {
-      completed_30d: completed30d ?? 0,
-      offers_total: offersTotal ?? 0,
-      offers_accepted: offersYes ?? 0,
-    },
-  });
-}
-
-function patientNextStep(
-  status: string,
-  consented: boolean,
-): { action: string; tone: 'wait' | 'do' | 'done' } {
-  switch (status) {
-    case 'registered':
-    case 'offering':
-      return {
-        action: 'We are finding the right oncology nurse for you. We will confirm on WhatsApp.',
-        tone: 'wait',
-      };
-
-    case 'assigned':
-      return consented
-        ? {
-          action: 'Your nurse is confirmed. Nothing is needed from you before the session.',
-          tone: 'done',
-        }
-        : {
-          action: 'Please sign the consent form we sent on WhatsApp so the session can go ahead.',
-          tone: 'do',
-        };
-
-    case 'consented':
-      return {
-        action: 'All set. Your nurse will arrive at the scheduled time.',
-        tone: 'done',
-      };
-
-    case 'otp_sent':
-      return {
-        action: 'Your nurse is on the way. Please give them the 6-digit number we sent you.',
-        tone: 'do',
-      };
-
-    case 'in_care':
-      return {
-        action: 'Your nurse is with you now. Nothing is needed from you.',
-        tone: 'done',
-      };
-
-    case 'care_done':
-      return {
-        action: 'Session complete. Your bill and discharge summary are on their way.',
-        tone: 'wait',
-      };
-
-    case 'awaiting_payment':
-      return {
-        action: 'Your bill is ready. Tap Pay on WhatsApp, or reply there once you have paid.',
-        tone: 'do',
-      };
-
-    case 'paid':
-      return {
-        action: 'Payment received — thank you. Nothing further is due.',
-        tone: 'done',
-      };
-
-    default:
-      return {
-        action: 'Nothing is needed from you right now.',
-        tone: 'wait',
-      };
-  }
-}
-
-const PATIENT_CASE_SELECT =
-  'id, case_code, status, care_type, line_type, scheduled_at, address, consented_at, ' +
-  'arrival_verified_at, next_chemo_at, ' +
-  'nurses:assigned_nurse_id(full_name), doctors:doctor_id(full_name)';
-
-async function patientHome(s: Session): Promise<Response> {
-  const { data: patient } = await db
-    .from('patients')
-    .select('id, full_name, cancer_type, language_pref')
-    .eq('id', s.person_id)
-    .maybeSingle();
-
-  if (!patient) {
-    return json({ ok: false, error: 'account_unavailable' }, 403);
-  }
-
-  const labels = await allLabels();
-
-  const { data: rows } = await db
-    .from('cases')
-    .select(PATIENT_CASE_SELECT)
-    .eq('patient_id', s.person_id)
-    .not('status', 'in', '("cancelled")')
-    .order('scheduled_at', { ascending: false })
-    .limit(30);
-
-  const ids = (rows ?? []).map((c) => c.id);
-
-  const invByCase = new Map<
-    string,
-    {
-      invoice_no: string;
-      total_inr: number;
-      status: string;
-      pdf_path: string | null;
-    }
-  >();
-
-  if (ids.length) {
-    const { data: invs } = await db
-      .from('invoices')
-      .select('case_id, invoice_no, total_inr, status, pdf_path')
-      .in('case_id', ids);
-
-    for (const i of invs ?? []) {
-      invByCase.set(i.case_id, i);
-    }
-  }
-
-  // deno-lint-ignore no-explicit-any
-  const cases = (rows ?? []).map((c: any) => {
-    const inv = invByCase.get(c.id) ?? null;
-    const documents: { label: string; kind: string }[] = [];
-
-    if (inv?.pdf_path) {
-      documents.push({
-        label: `Invoice ${inv.invoice_no}`,
-        kind: 'invoice',
-      });
-    }
-
-    if (['care_done', 'awaiting_payment', 'paid'].includes(c.status)) {
-      documents.push({
-        label: 'Discharge summary',
-        kind: 'discharge',
-      });
-    }
-
-    return {
-      id: c.id,
-      case_code: c.case_code,
-      status: c.status,
-      care_label: labels.care[c.care_type] ?? c.care_type,
-      line_label: labels.line[c.line_type] ?? c.line_type,
-      scheduled_at: c.scheduled_at,
-      address: c.address,
-      nurse_name: c.nurses?.full_name ?? null,
-      doctor_name: c.doctors?.full_name ?? null,
-      consented: !!c.consented_at,
-      arrival_verified_at: c.arrival_verified_at,
-      invoice: inv
-        ? {
-          invoice_no: inv.invoice_no,
-          total_inr: Number(inv.total_inr ?? 0),
-          status: inv.status,
-        }
-        : null,
-      documents,
-      next_step: patientNextStep(c.status, !!c.consented_at),
-    };
-  });
-
-  const nextChemo =
-    (rows ?? [])
-      // deno-lint-ignore no-explicit-any
-      .map((c: any) => c.next_chemo_at)
-      .filter(Boolean)
-      .sort()[0] ?? null;
-
-  return json({
-    ok: true,
-    wa_number: (await portalSettings()).wa_number,
-    patient: {
-      id: patient.id,
-      full_name: patient.full_name,
-      cancer_type: patient.cancer_type,
-      language_pref: patient.language_pref,
-    },
-    cases,
-    next_chemo_at: nextChemo,
-  });
-}
-
-const EVENT_PHRASE: Record<string, string> = {
-  registered: 'case registered',
-  offers_sent: 'nurse offers sent',
-  offer_yes: 'a nurse accepted the offer',
-  nurse_assigned: 'nurse assigned',
-  nurse_reassigned: 'nurse reassigned',
-  consent_sent: 'consent form sent to the family',
-  consented: 'consent signed',
-  otp_issued: 'arrival code sent to the family',
-  otp_verified: 'nurse arrival verified — session started',
-  care_completed: 'completion report received',
-  invoice_sent: 'invoice sent',
-  discharge_sent: 'discharge summary sent',
-  payment_claimed: 'family says they have paid',
-  payment_verified: 'payment verified',
-  feedback_received: 'feedback received',
-  next_chemo_set: 'next chemo date set',
+const INVOICE_TPL_DEFAULT = {
+  title: 'INVOICE',
+  accent: '#213B80',
+  tagline: 'Oncology home care · WhatsApp-coordinated',
+  labels: {
+    bill_to: 'BILL TO',
+    case_details: 'CASE DETAILS',
+    description: 'DESCRIPTION',
+    qty: 'QTY',
+    amount: 'AMOUNT',
+    subtotal: 'Subtotal',
+    discount: 'Discount',
+    total_due: 'TOTAL DUE',
+    pay_via_upi: 'PAY VIA UPI',
+    case: 'Case',
+    care_type: 'Care type',
+    session_date: 'Session date',
+    completed: 'Completed',
+    phone: 'Phone',
+    patient_code: 'Patient code',
+  },
+  upi_help:
+    'Open any UPI app, pay to the UPI ID above, then tap "I\'ve paid" on WhatsApp so our team can confirm your payment.',
+  paid_note: 'PAID — payment received and verified. Thank you.',
+  footer_note: '{{business}} · This is a computer-generated invoice; no signature is required.',
 };
 
-function waitingOn(status: string, consented: boolean): string | null {
-  if (['registered', 'offering'].includes(status)) {
-    return 'a nurse to accept the case';
-  }
+const DISCHARGE_TPL_DEFAULT = {
+  title: 'DISCHARGE SUMMARY',
+  accent: '#213B80',
+  tagline: 'Oncology home care · WhatsApp-coordinated',
+  sections: [
+    {
+      title: 'Patient',
+      rows: [
+        [{ label: 'Name', value: '{{patient.name}}' }, { label: 'Patient code', value: '{{patient.code}}' }],
+        [{ label: 'Cancer type', value: '{{patient.cancer_type}}' }, { label: 'Phone', value: '{{patient.phone}}' }],
+        [{ label: 'Address', value: '{{case.address}}' }],
+      ],
+    },
+    {
+      title: 'Care episode',
+      rows: [
+        [{ label: 'Case', value: '{{case.code}}' }, { label: 'Care type', value: '{{case.care_type}}' }],
+        [{ label: 'Line / access', value: '{{case.line_type}}' }, { label: 'Referring doctor', value: '{{doctor.name}}' }],
+        [{ label: 'Attending nurse', value: '{{nurse.name}}' }, { label: 'Scheduled', value: '{{case.scheduled}}' }],
+        [{ label: 'Nurse arrival verified', value: '{{case.arrival_verified}}' }, { label: 'Care completed', value: '{{case.completed}}' }],
+      ],
+    },
+    {
+      title: 'Session report (as recorded by the attending nurse)',
+      rows: [
+        [{ label: 'Session started', value: '{{report.started}}' }, { label: 'Session ended', value: '{{report.ended}}' }],
+        [{ label: 'Medications administered', value: '{{report.meds}}' }],
+        [{ label: 'Complications', value: '{{report.complications}}' }],
+        [{ label: 'Additional notes', value: '{{report.notes}}', skip_if_empty: true }],
+      ],
+    },
+    {
+      title: 'Consent',
+      rows: [
+        [{ label: 'Consent signed by', value: '{{consent.signed_by}}' }, { label: 'Consent status', value: '{{consent.status}}' }],
+      ],
+    },
+  ] as TplSection[],
+  signature_label: 'Authorised signatory — {{business}}',
+  source_note: "Generated from the nurse's completion report — {{business}}",
+  footer_note: "{{business}} · This summary is for the patient's medical records.",
+};
 
-  if (status === 'assigned' && !consented) {
-    return 'consent from the family';
-  }
-
-  if (status === 'awaiting_payment') {
-    return 'payment from the family';
-  }
-
-  return null;
+function hexToRgb(hex: unknown): ReturnType<typeof rgb> {
+  const m = String(hex ?? '').trim().match(/^#?([0-9a-f]{6})$/i);
+  if (!m) return BRAND;
+  const v = parseInt(m[1], 16);
+  return rgb(((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255);
 }
 
-async function doctorHome(s: Session): Promise<Response> {
-  const { data: doctor } = await db
-    .from('doctors')
-    .select('id, full_name, language_pref')
-    .eq('id', s.person_id)
-    .maybeSingle();
+/** Replace {{token}} against the data map; unknown tokens become ''. */
+function resolveTpl(s: unknown, map: Record<string, string>): string {
+  return String(s ?? '').replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, k) => map[k] ?? '');
+}
 
-  if (!doctor) {
-    return json({ ok: false, error: 'account_unavailable' }, 403);
-  }
-
-  const labels = await allLabels();
-
-  const { data: rows } = await db
-    .from('cases')
-    .select(
-      'id, case_code, status, care_type, scheduled_at, consented_at, next_chemo_at, ' +
-        'patients:patient_id(full_name, cancer_type), nurses:assigned_nurse_id(full_name)',
-    )
-    .eq('doctor_id', s.person_id)
-    .not('status', 'in', '("cancelled","archived")')
-    .order('scheduled_at', { ascending: false })
-    .limit(40);
-
-  const ids = (rows ?? []).map((c) => c.id);
-  const lastByCase = new Map<string, { label: string; at: string }>();
-
-  if (ids.length) {
-    const { data: events } = await db
-      .from('case_events')
-      .select('case_id, event_type, created_at')
-      .in('case_id', ids)
-      .order('created_at', { ascending: false })
-      .limit(400);
-
-    for (const e of events ?? []) {
-      if (!lastByCase.has(e.case_id)) {
-        lastByCase.set(e.case_id, {
-          label: EVENT_PHRASE[e.event_type] ??
-            String(e.event_type).replaceAll('_', ' '),
-          at: e.created_at,
-        });
-      }
-    }
-  }
-
+/** Deep-ish merge a stored template over the default (labels merge, sections replace). */
+// deno-lint-ignore no-explicit-any
+function mergeTpl<T extends Record<string, any>>(def: T, stored: unknown): T {
+  if (!stored || typeof stored !== 'object') return def;
   // deno-lint-ignore no-explicit-any
-  const patients = (rows ?? []).map((c: any) => ({
-    case_id: c.id,
-    case_code: c.case_code,
-    patient_name: c.patients?.full_name ?? 'Patient',
-    cancer_type: c.patients?.cancer_type ?? null,
-    status: c.status,
-    care_label: labels.care[c.care_type] ?? c.care_type,
-    scheduled_at: c.scheduled_at,
-    nurse_name: c.nurses?.full_name ?? null,
-    waiting_on: waitingOn(c.status, !!c.consented_at),
-    next_chemo_at: c.next_chemo_at,
-    last_event: lastByCase.get(c.id) ?? null,
-  }));
-
-  return json({
-    ok: true,
-    wa_number: (await portalSettings()).wa_number,
-    doctor: {
-      id: doctor.id,
-      full_name: doctor.full_name,
-      language_pref: doctor.language_pref,
-    },
-    patients,
-  });
+  const s = stored as Record<string, any>;
+  // deno-lint-ignore no-explicit-any
+  const out: Record<string, any> = { ...def };
+  for (const k of Object.keys(def)) {
+    if (s[k] == null) continue;
+    if (k === 'labels' && typeof s[k] === 'object') out[k] = { ...def[k], ...s[k] };
+    else out[k] = s[k];
+  }
+  return out as T;
 }
 
-async function me(s: Session): Promise<Response> {
-  const table =
-    s.role === 'patient'
-      ? 'patients'
-      : s.role === 'nurse'
-      ? 'nurses'
-      : 'doctors';
+/** Clamp a stored sections array into a drawable shape (bad data must never crash docgen). */
+function safeSections(raw: unknown, fallback: TplSection[]): TplSection[] {
+  if (!Array.isArray(raw)) return fallback;
+  const out: TplSection[] = [];
+  for (const sec of raw.slice(0, 10)) {
+    if (!sec || typeof sec !== 'object') continue;
+    const rows: TplCell[][] = [];
+    for (const row of (Array.isArray((sec as TplSection).rows) ? (sec as TplSection).rows : []).slice(0, 20)) {
+      if (!Array.isArray(row)) continue;
+      const cells = row.slice(0, 2)
+        .filter((c) => c && typeof c === 'object')
+        .map((c) => ({
+          label: String((c as TplCell).label ?? '').slice(0, 120),
+          value: String((c as TplCell).value ?? '').slice(0, 600),
+          skip_if_empty: Boolean((c as TplCell).skip_if_empty),
+        }));
+      if (cells.length) rows.push(cells);
+    }
+    out.push({ title: String((sec as TplSection).title ?? '').slice(0, 140), rows });
+  }
+  return out.length ? out : fallback;
+}
 
-  const { data } = await db
-    .from(table)
-    .select('id, full_name, language_pref')
-    .eq('id', s.person_id)
-    .maybeSingle();
+async function loadTpl(kind: 'invoice' | 'discharge', override?: unknown) {
+  const stored = override ?? (await getSetting(`doc_template_${kind}`));
+  return kind === 'invoice' ? mergeTpl(INVOICE_TPL_DEFAULT, stored) : mergeTpl(DISCHARGE_TPL_DEFAULT, stored);
+}
 
-  if (!data) {
-    return json({ ok: false, error: 'account_unavailable' }, 403);
+function brandBand(p: Painter, accent: ReturnType<typeof rgb>, businessName: string, tagline: string, docTitle: string, refLine: string, dateLine: string): number {
+  p.rect(0, PAGE_H - 96, PAGE_W, 96, accent);
+  p.text(businessName, MARGIN, PAGE_H - 46, { size: 19, bold: true, color: rgb(1, 1, 1) });
+  p.text(tagline, MARGIN, PAGE_H - 64, { size: 9, color: rgb(0.85, 0.89, 1) });
+  p.textRight(docTitle, PAGE_W - MARGIN, PAGE_H - 46, { size: 18, bold: true, color: rgb(1, 1, 1) });
+  p.textRight(refLine, PAGE_W - MARGIN, PAGE_H - 64, { size: 10, color: rgb(0.85, 0.89, 1) });
+  p.textRight(dateLine, PAGE_W - MARGIN, PAGE_H - 78, { size: 9, color: rgb(0.85, 0.89, 1) });
+  return PAGE_H - 126; // first content y
+}
+
+function footer(p: Painter, note: string): void {
+  p.rule(MARGIN, 58, PAGE_W - MARGIN, FAINT);
+  p.text(note, MARGIN, 44, { size: 8, color: MUTED });
+  p.textRight(`Generated ${fmtIST(new Date().toISOString())} IST`, PAGE_W - MARGIN, 44, { size: 8, color: MUTED });
+}
+
+/** Key/value row helper; returns next y. */
+function kv(p: Painter, label: string, value: string, x: number, y: number, valueWidth = 380): number {
+  p.text(label.toUpperCase(), x, y, { size: 7.5, bold: true, color: MUTED });
+  const lines = p.wrap(value || '—', valueWidth, 10, false, 4);
+  let yy = y - 12;
+  for (const ln of lines) {
+    p.text(ln, x, yy, { size: 10 });
+    yy -= 13;
+  }
+  return yy - 4;
+}
+
+// ─── Invoice ────────────────────────────────────────────────────────────────
+type InvoiceData = {
+  map: Record<string, string>;
+  items: { name: string; qty: number; amount: number }[];
+  subtotal: number;
+  discount: number;
+  total: number;
+  upi: string;
+  paid: boolean;
+};
+
+async function renderInvoice(tpl: typeof INVOICE_TPL_DEFAULT, d: InvoiceData): Promise<Uint8Array> {
+  const accent = hexToRgb(tpl.accent);
+  const L = tpl.labels;
+  const R = (s: unknown) => resolveTpl(s, d.map);
+  const { pdf, painter: p } = await makeDoc();
+  let y = brandBand(p, accent, d.map['business'], R(tpl.tagline), R(tpl.title), d.map['invoice.no'], `Date: ${d.map['invoice.date']}`);
+
+  // Bill-to (left) + case meta (right)
+  p.text(R(L.bill_to), MARGIN, y, { size: 7.5, bold: true, color: MUTED });
+  p.text(R(L.case_details), 330, y, { size: 7.5, bold: true, color: MUTED });
+  y -= 15;
+  p.text(d.map['patient.name'] || '—', MARGIN, y, { size: 12, bold: true });
+  let ly = y - 15;
+  for (const ln of p.wrap(d.map['patient.address'] ?? '', 250, 9.5, false, 3)) {
+    p.text(ln, MARGIN, ly, { size: 9.5, color: MUTED });
+    ly -= 12;
+  }
+  p.text(`${R(L.phone)}: ${d.map['patient.phone'] || '—'}`, MARGIN, ly, { size: 9.5, color: MUTED });
+  ly -= 12;
+  p.text(`${R(L.patient_code)}: ${d.map['patient.code'] || '—'}`, MARGIN, ly, { size: 9.5, color: MUTED });
+
+  let ry = y;
+  const rlabel = (k: string, v: string) => {
+    p.text(k, 330, ry, { size: 9, color: MUTED });
+    p.textRight(v, PAGE_W - MARGIN, ry, { size: 9.5 });
+    ry -= 14;
+  };
+  rlabel(R(L.case), d.map['case.code'] || '—');
+  rlabel(R(L.care_type), d.map['case.care_type'] || '—');
+  rlabel(R(L.session_date), d.map['case.scheduled'] || '—');
+  rlabel(R(L.completed), d.map['case.completed'] || '—');
+
+  y = Math.min(ly, ry) - 28;
+
+  p.rect(MARGIN, y - 6, PAGE_W - 2 * MARGIN, 22, FAINT);
+  p.text(R(L.description), MARGIN + 8, y, { size: 8, bold: true, color: MUTED });
+  p.textRight(R(L.qty), 430, y, { size: 8, bold: true, color: MUTED });
+  p.textRight(R(L.amount), PAGE_W - MARGIN - 8, y, { size: 8, bold: true, color: MUTED });
+  y -= 24;
+
+  // Items — bounded: totals + the UPI box below need ~250pt, so the table
+  // stops with an honest "…and N more" line instead of drawing off the page.
+  let drawn = 0;
+  for (const it of d.items) {
+    if (y < 340 && drawn < d.items.length - 1) break;
+    const lines = p.wrap(it.name, 300, 10, false, 2);
+    p.text(lines[0], MARGIN + 8, y, { size: 10 });
+    p.textRight(String(it.qty), 430, y, { size: 10 });
+    p.textRight(money(it.amount), PAGE_W - MARGIN - 8, y, { size: 10 });
+    y -= 14;
+    for (const extra of lines.slice(1)) {
+      p.text(extra, MARGIN + 8, y, { size: 10 });
+      y -= 14;
+    }
+    p.rule(MARGIN, y + 4, PAGE_W - MARGIN);
+    y -= 8;
+    drawn++;
+  }
+  if (drawn < d.items.length) {
+    p.text(`… and ${d.items.length - drawn} more item(s) — the total below covers everything.`, MARGIN + 8, y, { size: 9, color: MUTED });
+    y -= 18;
   }
 
-  return json({
-    ok: true,
-    profile: {
-      role: s.role,
-      id: data.id,
-      full_name: data.full_name,
-      language_pref: data.language_pref,
-    },
-  });
+  // Totals
+  const totX = 360;
+  const totRight = PAGE_W - MARGIN - 8;
+  p.text(R(L.subtotal), totX, y, { size: 10, color: MUTED });
+  p.textRight(money(d.subtotal), totRight, y, { size: 10 });
+  y -= 16;
+  if (d.discount > 0) {
+    p.text(R(L.discount), totX, y, { size: 10, color: MUTED });
+    p.textRight(`- ${money(d.discount)}`, totRight, y, { size: 10 });
+    y -= 16;
+  }
+  y -= 10; // clear the row above before painting the highlight box
+  p.rect(totX - 10, y - 8, PAGE_W - MARGIN - totX + 10, 26, FAINT);
+  p.text(R(L.total_due), totX, y, { size: 11, bold: true });
+  p.textRight(money(d.total), totRight, y, { size: 12, bold: true });
+  y -= 44;
+
+  // UPI box
+  p.rect(MARGIN, y - 58, PAGE_W - 2 * MARGIN, 72, accent, true);
+  p.text(R(L.pay_via_upi), MARGIN + 14, y - 6, { size: 8, bold: true, color: accent });
+  p.text(d.upi || '—', MARGIN + 14, y - 24, { size: 14, bold: true });
+  let uy = y - 42;
+  for (const ln of p.wrap(R(tpl.upi_help), PAGE_W - 2 * MARGIN - 28, 8.5, false, 2)) {
+    p.text(ln, MARGIN + 14, uy, { size: 8.5, color: MUTED });
+    uy -= 11;
+  }
+  y -= 80;
+
+  if (d.paid) {
+    p.text(R(tpl.paid_note), MARGIN, y, { size: 10, bold: true, color: rgb(0.1, 0.5, 0.25) });
+  }
+
+  footer(p, R(tpl.footer_note));
+  return new Uint8Array(await pdf.save());
 }
 
-async function logout(s: Session): Promise<Response> {
-  await db
-    .from('portal_sessions')
-    .update({ revoked_at: new Date().toISOString() })
-    .eq('id', s.id);
+// deno-lint-ignore no-explicit-any
+async function buildInvoice(c: any): Promise<{ bytes: Uint8Array; invoiceId: string } | { error: string }> {
+  const { data: inv, error } = await db.from('invoices').select('*').eq('case_id', c.id).maybeSingle();
+  if (error) return { error: `invoice_lookup_failed: ${error.message}` };
+  if (!inv) return { error: 'no_invoice_for_case' };
 
-  return json({ ok: true });
-}
+  const business = (await getSetting<string>('business_name')) ?? 'Carcinome Home Care';
+  const upi = inv.upi_vpa || ((await getSetting<string>('upi_vpa')) ?? '');
+  const { care } = await labels();
+  const tpl = await loadTpl('invoice');
+  const patient = c.patients ?? {};
 
-Deno.serve(async (req: Request): Promise<Response> => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', {
-      status: 200,
-      headers: CORS_HEADERS,
+  const items: { name: string; qty: number; amount: number }[] = [];
+  const raw = Array.isArray(inv.line_items) ? inv.line_items.slice(0, 40) : [];
+  for (const it of raw) {
+    const qtyN = Number(it?.qty);
+    const amtN = Number(it?.amount ?? it?.amount_inr ?? it?.total ?? 0);
+    items.push({
+      name: String(it?.name ?? it?.label ?? 'Home care service'),
+      qty: isFinite(qtyN) && qtyN > 0 ? qtyN : 1,
+      amount: isFinite(amtN) ? amtN : 0, // "₹NaN" must never reach a family's bill
+    });
+  }
+  if (items.length === 0) {
+    items.push({
+      name: care[c.care_type] ?? 'Home care service',
+      qty: 1,
+      amount: Number(inv.subtotal_inr ?? c.price_inr ?? 0),
     });
   }
 
-  if (req.method !== 'POST') {
-    return json({ ok: false, error: 'method_not_allowed' }, 405);
+  const bytes = await renderInvoice(tpl as typeof INVOICE_TPL_DEFAULT, {
+    map: {
+      business,
+      'invoice.no': String(inv.invoice_no ?? ''),
+      'invoice.date': fmtIST(inv.created_at, false),
+      'patient.name': patient.full_name ?? '—',
+      'patient.address': patient.address ?? c.address ?? '',
+      'patient.phone': `+${patient.phone ?? patient.wa_number ?? '—'}`,
+      'patient.code': patient.patient_code ?? '—',
+      'case.code': c.case_code ?? '—',
+      'case.care_type': care[c.care_type] ?? c.care_type ?? '—',
+      'case.scheduled': fmtIST(c.scheduled_at),
+      'case.completed': fmtIST(c.completed_at),
+      upi,
+    },
+    items,
+    subtotal: isFinite(Number(inv.subtotal_inr)) ? Number(inv.subtotal_inr) : 0,
+    discount: isFinite(Number(inv.discount_inr)) ? Number(inv.discount_inr) : 0,
+    total: isFinite(Number(inv.total_inr)) ? Number(inv.total_inr) : 0,
+    upi,
+    paid: inv.status === 'paid_verified',
+  });
+  return { bytes, invoiceId: inv.id };
+}
+
+// ─── Discharge summary ──────────────────────────────────────────────────────
+async function renderDischarge(
+  tpl: typeof DISCHARGE_TPL_DEFAULT,
+  map: Record<string, string>,
+  opts: { reportMissing?: boolean; dateLine: string; refLine: string } ,
+): Promise<Uint8Array> {
+  const accent = hexToRgb(tpl.accent);
+  const R = (s: unknown) => resolveTpl(s, map);
+  const { pdf, painter: p } = await makeDoc();
+  let y = brandBand(p, accent, map['business'], R(tpl.tagline), R(tpl.title), opts.refLine, `Date: ${opts.dateLine}`);
+
+  const section = (title: string): void => {
+    p.text(title.toUpperCase(), MARGIN, y, { size: 9, bold: true, color: accent });
+    p.rule(MARGIN, y - 5, PAGE_W - MARGIN);
+    y -= 22;
+  };
+  const colW = (PAGE_W - 2 * MARGIN) / 2;
+  const pair = (l1: string, v1: string, l2?: string, v2?: string): void => {
+    const yA = kv(p, l1, v1, MARGIN, y, colW - 20);
+    const yB = l2 !== undefined ? kv(p, l2, v2 ?? '—', MARGIN + colW, y, colW - 20) : y - 29;
+    y = Math.min(yA, yB) - 4;
+  };
+
+  const sections = safeSections(tpl.sections, DISCHARGE_TPL_DEFAULT.sections);
+  // The "report not yet submitted" note belongs to whichever section actually
+  // references report fields — never a hardcoded index (teams reorder sections).
+  const reportSectionIdx = sections.findIndex((s) =>
+    s.rows.some((row) => row.some((cell) => /\{\{\s*report\./.test(cell.value)))
+  );
+  // Rows are PRE-MEASURED (a two-cell row with 4-line wraps stands ~76pt tall)
+  // so nothing can overprint the signature/footer band below y≈112.
+  const FLOOR = 112;
+  const rowHeight = (a: TplCell, v1: string, b?: TplCell, v2?: string): number => {
+    const la = p.wrap(v1 || '—', colW - 20, 10, false, 4).length;
+    const lb = b ? p.wrap(v2 || '—', colW - 20, 10, false, 4).length : 0;
+    return 12 + Math.max(la, lb, 1) * 13 + 8;
+  };
+  let clipped = false;
+  outer:
+  for (let si = 0; si < sections.length; si++) {
+    const sec = sections[si];
+    if (y - 42 < FLOOR) { clipped = true; break; } // title + at least one row must fit
+    section(sec.title);
+    for (const row of sec.rows) {
+      const [a, b] = row;
+      const v1 = R(a.value);
+      const v2 = b ? R(b.value) : undefined;
+      if (a.skip_if_empty && !v1 && (!b || (b.skip_if_empty && !v2))) continue;
+      if (y - rowHeight(a, v1, b, v2) < FLOOR) { clipped = true; break outer; }
+      if (b) pair(R(a.label), v1 || '—', R(b.label), v2 || '—');
+      else pair(R(a.label), v1 || '—');
+    }
+    if (si === reportSectionIdx && opts.reportMissing) {
+      if (y - 20 < FLOOR) { clipped = true; break; }
+      p.text('Completion report not yet submitted for this case.', MARGIN, y, { size: 9.5, color: MUTED });
+      y -= 20;
+    }
   }
+  if (clipped) {
+    p.text('… content trimmed to fit one page — shorten the template sections.', MARGIN, Math.max(y, FLOOR), { size: 8.5, color: MUTED });
+    y = Math.max(y - 16, FLOOR - 2);
+  }
+
+  // Signature + disclaimer
+  const sigY = Math.max(y - 30, 110);
+  p.rule(PAGE_W - MARGIN - 180, sigY, PAGE_W - MARGIN, MUTED);
+  p.textRight(R(tpl.signature_label), PAGE_W - MARGIN, sigY - 12, { size: 8.5, color: MUTED });
+  p.text(R(tpl.source_note), MARGIN, 78, { size: 8.5, color: MUTED });
+  footer(p, R(tpl.footer_note));
+  return new Uint8Array(await pdf.save());
+}
+
+// deno-lint-ignore no-explicit-any
+async function buildDischarge(c: any): Promise<{ bytes: Uint8Array } | { error: string }> {
+  const [{ data: report }, { data: consent }] = await Promise.all([
+    db.from('completion_reports').select('*').eq('case_id', c.id).maybeSingle(),
+    db.from('consents').select('signed_name, relationship, agreed').eq('case_id', c.id).maybeSingle(),
+  ]);
+  const business = (await getSetting<string>('business_name')) ?? 'Carcinome Home Care';
+  const { care, line } = await labels();
+  const tpl = await loadTpl('discharge');
+  const patient = c.patients ?? {};
+  const doctor = c.doctors ?? null;
+  const nurse = c.nurses ?? null;
+
+  const compl = report?.complications ?? '';
+  const map: Record<string, string> = {
+    business,
+    'patient.name': patient.full_name ?? '',
+    'patient.code': patient.patient_code ?? '',
+    'patient.cancer_type': patient.cancer_type ?? '',
+    'patient.phone': `+${patient.phone ?? patient.wa_number ?? '—'}`,
+    'case.address': c.address || patient.address || '',
+    'case.code': c.case_code ?? '',
+    'case.care_type': care[c.care_type] ?? c.care_type ?? '',
+    'case.line_type': line[c.line_type] ?? c.line_type ?? '',
+    'doctor.name': doctor
+      ? `Dr. ${String(doctor.full_name).replace(/^\s*Dr\.?\s+/i, '')}${doctor.specialty ? ` (${doctor.specialty})` : ''}`
+      : '',
+    'nurse.name': nurse?.full_name ?? '',
+    'case.scheduled': fmtIST(c.scheduled_at),
+    'case.arrival_verified': fmtIST(c.arrival_verified_at),
+    'case.completed': fmtIST(c.completed_at),
+    'report.started': report?.started_hhmm ?? '',
+    'report.ended': report?.ended_hhmm ?? '',
+    'report.meds': report?.meds_administered ?? '',
+    'report.complications': report?.complication_notes ? `${compl || '—'} — ${report.complication_notes}` : compl,
+    'report.notes': report?.notes ?? '',
+    'consent.signed_by': consent?.signed_name
+      ? `${consent.signed_name}${consent.relationship ? ` (${consent.relationship})` : ''}`
+      : '',
+    'consent.status': consent ? (consent.agreed ? 'Given via WhatsApp consent form' : 'DECLINED') : 'Not on record',
+  };
+
+  const bytes = await renderDischarge(tpl as typeof DISCHARGE_TPL_DEFAULT, map, {
+    reportMissing: !report,
+    refLine: c.case_code ?? '',
+    dateLine: fmtIST(c.completed_at ?? new Date().toISOString(), false),
+  });
+  return { bytes };
+}
+
+// ─── Preview (sample data, returned inline — powers the template editor) ────
+async function buildPreview(doc: 'invoice' | 'discharge', override: unknown): Promise<Uint8Array> {
+  const business = (await getSetting<string>('business_name')) ?? 'Carcinome Home Care';
+  const upi = (await getSetting<string>('upi_vpa')) ?? 'carcinome@upi';
+  const now = new Date().toISOString();
+  if (doc === 'invoice') {
+    const tpl = await loadTpl('invoice', override);
+    return await renderInvoice(tpl as typeof INVOICE_TPL_DEFAULT, {
+      map: {
+        business,
+        'invoice.no': 'INV-2026-0042',
+        'invoice.date': fmtIST(now, false),
+        'patient.name': 'Meera Sharma',
+        'patient.address': '12 Rose Villa, Andheri West, Mumbai 400058',
+        'patient.phone': '+91 90000 00010',
+        'patient.code': 'CHC-2026-0042',
+        'case.code': 'CASE-2026-0042',
+        'case.care_type': 'Chemotherapy infusion',
+        'case.scheduled': fmtIST(now),
+        'case.completed': fmtIST(now),
+        upi,
+      },
+      items: [{ name: 'Chemotherapy infusion — home visit', qty: 1, amount: 5000 }],
+      subtotal: 5000,
+      discount: 0,
+      total: 5000,
+      upi,
+      paid: false,
+    });
+  }
+  const tpl = await loadTpl('discharge', override);
+  return await renderDischarge(tpl as typeof DISCHARGE_TPL_DEFAULT, {
+    business,
+    'patient.name': 'Meera Sharma',
+    'patient.code': 'CHC-2026-0042',
+    'patient.cancer_type': 'Breast cancer',
+    'patient.phone': '+91 90000 00010',
+    'case.address': '12 Rose Villa, Andheri West, Mumbai 400058',
+    'case.code': 'CASE-2026-0042',
+    'case.care_type': 'Chemotherapy infusion',
+    'case.line_type': 'PICC Line',
+    'doctor.name': 'Dr. Arjun Mehta (Medical Oncology)',
+    'nurse.name': 'Priya',
+    'case.scheduled': fmtIST(now),
+    'case.arrival_verified': fmtIST(now),
+    'case.completed': fmtIST(now),
+    'report.started': '14:20',
+    'report.ended': '16:05',
+    'report.meds': 'Paclitaxel 175mg/m² IV over 3h; Ondansetron 8mg IV',
+    'report.complications': 'None',
+    'report.notes': 'Patient tolerated the session well. Next dressing change in 7 days.',
+    'consent.signed_by': 'Ramesh Sharma (spouse)',
+    'consent.status': 'Given via WhatsApp consent form',
+  }, { reportMissing: false, refLine: 'CASE-2026-0042', dateLine: fmtIST(now, false) });
+}
+
+// ─── HTTP entry ─────────────────────────────────────────────────────────────
+Deno.serve(async (req) => {
+  if (req.method !== 'POST') return json({ ok: false, error: 'method_not_allowed' }, 405);
+
+  // Internal guard
+  let serviceKey = '';
+  try {
+    serviceKey = getServiceKey();
+  } catch (e) {
+    console.error('docgen: getServiceKey failed:', e);
+  }
+  const cronSecret = Deno.env.get('CRON_SECRET') ?? '';
+  const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
+  const internal = req.headers.get('x-internal-secret') ?? '';
+  const authorized = (serviceKey !== '' && safeEqual(bearer, serviceKey)) ||
+    (cronSecret !== '' && safeEqual(internal, cronSecret));
+  if (!authorized) return json({ ok: false, error: 'forbidden' }, 403);
 
   // deno-lint-ignore no-explicit-any
   let body: any;
-
   try {
     body = await req.json();
   } catch {
     return json({ ok: false, error: 'invalid_json' }, 400);
   }
+  const caseId = String(body?.case_id ?? '');
+  const doc = String(body?.doc ?? '');
+  if (!['invoice', 'discharge'].includes(doc)) {
+    return json({ ok: false, error: "doc ('invoice'|'discharge') required" }, 400);
+  }
 
-  const action = String(body?.action ?? '');
+  // Preview mode: render with SAMPLE data (optionally an unsaved template
+  // override) and return the PDF inline — no storage, no WhatsApp upload.
+  if (body?.preview === true) {
+    try {
+      const bytes = await buildPreview(doc as 'invoice' | 'discharge', body?.template ?? undefined);
+      let b64 = '';
+      const CHUNK = 0x8000;
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        b64 += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+      }
+      return json({ ok: true, pdf_base64: btoa(b64) });
+    } catch (e) {
+      console.error(`docgen preview(${doc}) exception:`, e);
+      return json({ ok: false, error: String(e) }, 500);
+    }
+  }
+
+  if (!caseId) {
+    return json({ ok: false, error: 'case_id required' }, 400);
+  }
+
+  const { data: c, error: caseErr } = await db
+    .from('cases')
+    .select(
+      'id, case_code, status, care_type, line_type, scheduled_at, address, price_inr, ' +
+      'arrival_verified_at, completed_at, ' +
+      'patients:patient_id(id, full_name, patient_code, cancer_type, address, phone, wa_number, language_pref), ' +
+      'doctors:doctor_id(full_name, specialty), ' +
+      'nurses:assigned_nurse_id(full_name, phone)',
+    )
+    .eq('id', caseId)
+    .maybeSingle();
+  if (caseErr) return json({ ok: false, error: `case_lookup_failed: ${caseErr.message}` }, 500);
+  if (!c) return json({ ok: false, error: 'case_not_found' }, 404);
 
   try {
-    if (action === 'config') {
-      const cfg = await portalSettings();
+    let bytes: Uint8Array;
+    let path: string;
+    let invoiceId: string | null = null;
 
-      return json({
-        ok: true,
-        enabled: cfg.enabled,
-        show_admin_login: cfg.show_admin_login,
-        sample_login: cfg.sample_login,
-        wa_number: cfg.wa_number,
-      });
+    if (doc === 'invoice') {
+      const r = await buildInvoice(c);
+      if ('error' in r) return json({ ok: false, error: r.error }, 400);
+      bytes = r.bytes;
+      invoiceId = r.invoiceId;
+      path = `cases/${caseId}/invoice.pdf`;
+    } else {
+      const r = await buildDischarge(c);
+      if ('error' in r) return json({ ok: false, error: r.error }, 400);
+      bytes = r.bytes;
+      path = `cases/${caseId}/discharge_summary.pdf`;
     }
 
-    if (action === 'request_link') {
-      const role = String(body?.role ?? '') as PortalRole;
+    const { error: upErr } = await db.storage
+      .from(BUCKET)
+      .upload(path, bytes, { contentType: 'application/pdf', upsert: true });
+    if (upErr) return json({ ok: false, error: `storage_upload_failed: ${upErr.message}` }, 500);
 
-      if (!ROLES.includes(role)) {
-        return json({ ok: false, error: 'invalid_role' }, 400);
-      }
-
-      return await requestLink(role, String(body?.phone ?? ''));
+    if (invoiceId) {
+      await db.from('invoices').update({ pdf_path: path }).eq('id', invoiceId);
     }
 
-    if (action === 'password_login') {
-      const role = String(body?.role ?? '') as PortalRole;
-
-      if (role !== 'nurse' && role !== 'doctor') {
-        return json({ ok: false, error: 'invalid_role' }, 400);
-      }
-
-      return await passwordLogin(
-        role,
-        String(body?.email ?? ''),
-        String(body?.password ?? ''),
-      );
+    let mediaId: string | null = null;
+    let mediaError: string | undefined;
+    try {
+      mediaId = await uploadMedia(bytes, 'application/pdf');
+    } catch (e) {
+      console.error('WA media upload failed:', e);
+      mediaError = String(e);
     }
 
-    if (action === 'sample_login') {
-      const role = String(body?.role ?? '') as PortalRole;
-
-      if (!ROLES.includes(role)) {
-        return json({ ok: false, error: 'invalid_role' }, 400);
-      }
-
-      return await sampleLogin(role);
-    }
-
-    if (action === 'verify') {
-      return await verifyLink(String(body?.token ?? ''));
-    }
-
-    const s = await loadSession(req);
-
-    if (!s) {
-      return json({ ok: false, error: 'not_signed_in' }, 401);
-    }
-
-    switch (action) {
-      case 'me':
-        return await me(s);
-
-      case 'logout':
-        return await logout(s);
-
-      case 'nurse_home':
-        if (s.role !== 'nurse') {
-          return json({ ok: false, error: 'wrong_role' }, 403);
-        }
-        return await nurseHome(s);
-
-      case 'patient_home':
-        if (s.role !== 'patient') {
-          return json({ ok: false, error: 'wrong_role' }, 403);
-        }
-        return await patientHome(s);
-
-      case 'doctor_home':
-        if (s.role !== 'doctor') {
-          return json({ ok: false, error: 'wrong_role' }, 403);
-        }
-        return await doctorHome(s);
-
-      default:
-        return json({ ok: false, error: `unknown_action: ${action}` }, 400);
-    }
+    return json({ ok: true, path, media_id: mediaId, ...(mediaError ? { media_error: mediaError } : {}) });
   } catch (e) {
-    console.error(`portal ${action} exception:`, e);
+    console.error(`docgen(${doc}) exception:`, e);
     return json({ ok: false, error: String(e) }, 500);
   }
 });
