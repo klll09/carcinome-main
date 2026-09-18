@@ -9,7 +9,7 @@
 // ============================================================
 
 import { getSupabase } from '../supabase.js';
-import { formatTime, formatDateTime, escapeHtml, capitalize } from '../utils/formatters.js';
+import { escapeHtml, formatActor, formatRelativeTime, formatDateTime } from '../utils/formatters.js';
 import { icon } from './icons.js';
 
 const IST = 'Asia/Kolkata';
@@ -106,7 +106,8 @@ function renderMsg(msg, participants, relayCopies, openGroups) {
 function renderEvent(evt) {
   const type = String(evt.event_type || 'event');
   const tone = GOOD_EVENTS.test(type) ? 'evt-good' : BAD_EVENTS.test(type) ? 'evt-bad' : '';
-  const actor = evt.actor && evt.actor !== 'system' ? ` · ${escapeHtml(evt.actor)}` : '';
+  const actorLabel = formatActor(evt.actor);
+  const actor = actorLabel ? ` · ${escapeHtml(actorLabel)}` : '';
   return `
     <div class="evt-chip ${tone}" title="${escapeHtml(JSON.stringify(evt.data || {})).slice(0, 400)}">
       <span>${escapeHtml(capitalize(type))}${actor}</span>

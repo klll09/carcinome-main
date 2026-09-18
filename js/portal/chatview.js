@@ -13,7 +13,7 @@
 import {
   connectChat, getChatIdentity, listRooms, joinRoom, sendMessage, onMessage, emitTyping, onTyping,
 } from './chat.js';
-import { escapeHtml, formatRelativeTime, formatDateTime } from '../utils/formatters.js';
+import { escapeHtml, formatActor, formatRelativeTime, formatDateTime } from '../utils/formatters.js';
 import { icon } from '../components/icons.js';
 
 const ROLE_EMOJI = { patient: '🧑', nurse: '🩺', doctor: '🥼', ops: '🛟', supplier: '📦', poc: '🧭' };
@@ -190,7 +190,8 @@ export async function mountChatView(container, { title = 'Case chats' } = {}) {
   function eventChip(e) {
     const type = String(e.event_type || '');
     const tone = GOOD_EVENTS.test(type) ? 'evt-good' : BAD_EVENTS.test(type) ? 'evt-bad' : '';
-    const actor = e.actor ? ` · ${escapeHtml(e.actor)}` : '';
+    const actorLabel = formatActor(e.actor);
+    const actor = actorLabel ? ` · ${escapeHtml(actorLabel)}` : '';
     return `
       <div class="evt-chip ${tone}">
         <span>${escapeHtml(e.label)}${actor}</span>

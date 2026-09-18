@@ -6,6 +6,17 @@
 
 const IST = 'Asia/Kolkata';
 
+// Turns the raw event actor stored in case_events ('admin:104cb76d-a78b-…',
+// 'system', a nurse/doctor's own name) into what a family/staff member
+// should actually read. The uuid is kept in the database for accountability;
+// only the display strips it.
+export function formatActor(actor) {
+  const s = String(actor ?? '').trim();
+  if (!s || s === 'system') return '';
+  if (/^admin:/i.test(s)) return 'Admin';
+  return s;
+}
+
 export function formatDate(dateStr) {
   if (!dateStr) return '—';
   const d = new Date(dateStr);
