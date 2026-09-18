@@ -60,14 +60,14 @@
   <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" /></noscript>
 
   <!-- App stylesheets — query string busts the cache when CSS changes -->
-  <link rel="stylesheet" href="css/variables.css?v=20260912a" />
-  <link rel="stylesheet" href="css/base.css?v=20260912a" />
-  <link rel="stylesheet" href="css/components.css?v=20260912a" />
-  <link rel="stylesheet" href="css/layout.css?v=20260912a" />
+  <link rel="stylesheet" href="css/variables.css?v=20260918c" />
+  <link rel="stylesheet" href="css/base.css?v=20260918c" />
+  <link rel="stylesheet" href="css/components.css?v=20260918c" />
+  <link rel="stylesheet" href="css/layout.css?v=20260918c" />
   <!-- Landing + patient/nurse/doctor portals. Loaded here rather than injected
        on demand (the way journeys.css is) because #welcome is the first screen
        every signed-out visitor sees: an injected sheet would flash unstyled. -->
-  <link rel="stylesheet" href="css/portal.css?v=20260912a" />
+  <link rel="stylesheet" href="css/portal.css?v=20260918c" />
 
   <!-- Favicon (inline SVG data URI) -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230F8A5F' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z'/><path d='M3.2 12h4l1.8-3 2.4 5 1.8-2h4.6'/></svg>" />
@@ -107,7 +107,7 @@
        browser happily serves a CACHED app.js that then requests fresh page
        modules, so a deploy half-lands and the symptom is "the new page is not
        there" on a machine that has visited before. -->
-  <script type="module" src="js/app.js?v=20260912a"></script>
+  <script type="module" src="js/app.js?v=20260918c"></script>
 
   <!-- Boot watchdog: surfaces a clear error if external scripts fail to load
        (network blocked, CDN down, captive portal, etc.) instead of leaving
