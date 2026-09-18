@@ -60,7 +60,7 @@ async function adminLogin() {
   const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: 'POST',
     headers: { apikey: SUPABASE_PUBLISHABLE_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'admin@carcinome.in', password: ADMIN_PASSWORD }),
+    body: JSON.stringify({ email: 'admin@carcinome.com', password: ADMIN_PASSWORD }),
   });
   const j = await r.json();
   if (!j.access_token) throw new Error('admin login failed: ' + JSON.stringify(j).slice(0, 200));
