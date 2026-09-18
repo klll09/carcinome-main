@@ -257,17 +257,22 @@ function showCredentialsModal(name, email, password, created) {
   overlay.querySelector('[data-cred-close]').addEventListener('click', () => closeModal());
 }
 
-async function issueLogin(btn, role, id, name, emailValue) {
+async function issueLogin(btn, role, id, name, emailValue, passwordValue) {
   const email = String(emailValue || '').trim().toLowerCase();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     showToast('Enter a valid email first, then save', 'warning');
+    return;
+  }
+  const password = String(passwordValue || '').trim();
+  if (password && password.length < 6) {
+    showToast('Password must be at least 6 characters', 'warning');
     return;
   }
   const original = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Working…';
   try {
-    const res = await adminAction('set_staff_login', { role, id, email });
+    const res = await adminAction('set_staff_login', { role, id, email, password: password || undefined });
     showCredentialsModal(name, res.email, res.password, res.created);
   } catch (err) {
     console.error('[issueLogin] failed:', err);
@@ -321,16 +326,20 @@ function openEditDoctorModal(container, id) {
             <option value="muted" ${doctor.default_relay === 'muted' ? 'selected' : ''}>Muted</option>
           </select>
         </div>
-        <div class="form-group">
+                <div class="form-group">
           <label class="form-label" for="ed-email">Portal login email <span style="text-transform:none;letter-spacing:0">(optional)</span></label>
+          <input class="form-input" id="ed-email" type="email" placeholder="doctor@example.com" value="${escapeHtml(doctor.email || '')}" autocomplete="off" />
+          <span class="form-error" data-err="email" hidden></span>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="ed-password">Password <span style="text-transform:none;letter-spacing:0">(leave blank to auto-generate)</span></label>
           <div style="display:flex; gap:var(--s2); align-items:flex-start">
-            <input class="form-input" id="ed-email" type="email" placeholder="doctor@example.com" value="${escapeHtml(doctor.email || '')}" autocomplete="off" style="flex:1" />
+            <input class="form-input" id="ed-password" type="text" placeholder="Type a password, or leave blank" autocomplete="new-password" style="flex:1" />
             <button class="btn btn-secondary" id="ed-issue-login" type="button" style="white-space:nowrap">
-              ${doctor.auth_user_id ? 'Reset password' : 'Create login'}
+              ${doctor.auth_user_id ? 'Set password' : 'Create login'}
             </button>
           </div>
-          <span class="form-hint">Save the email first if you just changed it, then click to create or reset the password. No Supabase dashboard needed.</span>
-          <span class="form-error" data-err="email" hidden></span>
+          <span class="form-hint">Save the email above first if you just changed it, then set the password here. No Supabase dashboard needed.</span>
         </div>
       </form>
     `,
@@ -351,7 +360,7 @@ function openEditDoctorModal(container, id) {
   $('[data-ed-cancel]').addEventListener('click', () => closeModal());
 
   $('#ed-issue-login').addEventListener('click', (e) => {
-    issueLogin(e.currentTarget, 'doctor', id, doctor.full_name, $('#ed-email').value);
+  issueLogin(e.currentTarget, 'doctor', id, doctor.full_name, $('#ed-email').value, $('#ed-password').value);
   });
 
   const saveBtn = $('[data-ed-save]');

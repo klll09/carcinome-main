@@ -855,7 +855,11 @@ async function actionSetStaffLogin(body: any, adminId: string): Promise<Response
     .from(table).select('id, full_name').eq('id', id).maybeSingle();
   if (rowErr || !row) return json({ ok: false, error: 'not_found' }, 404);
 
-  const password = genStaffPassword();
+  const customPassword = typeof body?.password === 'string' ? body.password.trim() : '';
+  if (customPassword && customPassword.length < 6) {
+    return json({ ok: false, error: 'password must be at least 6 characters' }, 400);
+  }
+  const password = customPassword || genStaffPassword();
   let userId: string | null = null;
   let created = false;
 
