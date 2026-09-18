@@ -8,7 +8,7 @@ export const CONFIG = {
   SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFtcHdzemxieGJtcG96amlndmhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc3NTAyOTksImV4cCI6MjEwMzMyNjI5OX0.T8wPryVM1k5jG15-mo15Eg4cHBl2sC58I-Okp7jefg4',
   FUNCTIONS_URL: 'https://ampwszlbxbmpozjigvhk.supabase.co/functions/v1',
   APP_NAME: 'Carcinome Home Care',
-  VERSION: '20260912a',
+  VERSION: '20260918c',   
   DEFAULT_PAGE_SIZE: 25,
 
   // Socket.IO group-chat server (server/). GitHub Pages cannot host a
