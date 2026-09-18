@@ -33,6 +33,8 @@ export default async function render() {
     subtitle: SUBTITLE[role] ?? '',
   });
 
+  document.querySelector('.pt-main')?.classList.add('pt-main-wide');
+
   content.innerHTML = `
     <button class="pt-back" type="button" id="pc-back">${icon('arrowLeft')}<span>Back to my dashboard</span></button>
     <div id="pc-chat"></div>`;

@@ -24,6 +24,7 @@ const NAV_ITEMS = [
       { id: 'cases',     label: 'Cases',       icon: 'clipboard',   route: 'cases' },
       { id: 'patients',  label: 'Patients',    icon: 'users',       route: 'patients' },
       { id: 'nurses',    label: 'Nurses',      icon: 'stethoscope', route: 'nurses' },
+      { id: 'doctors',   label: 'Doctors',     icon: 'briefcase',   route: 'doctors' },
       { id: 'suppliers', label: 'Marketplace', icon: 'package',     route: 'suppliers' },
     ],
   },

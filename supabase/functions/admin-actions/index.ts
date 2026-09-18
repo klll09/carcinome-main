@@ -828,6 +828,79 @@ async function actionSendTestMessage(
   });
 }
 
+// ─── set_staff_login: create/reset a nurse or doctor's portal password ──────
+// Replaces the old two-step flow (create user in Supabase dashboard, rerun
+// 12_staff_email_login.sql). This does both in one call: creates the Auth
+// user if it doesn't exist (or resets the password if it does), then links
+// auth_user_id on the nurses/doctors row. Returns the password ONCE — it is
+// never stored anywhere, so the admin must copy it now and hand it to staff.
+function genStaffPassword(): string {
+  const b = new Uint8Array(9);
+  crypto.getRandomValues(b);
+  const rand = Array.from(b, (x) => x.toString(36)).join('').slice(0, 10);
+  return `Care-${rand}`;
+}
+
+async function actionSetStaffLogin(body: any, adminId: string): Promise<Response> {
+  const role = body?.role === 'doctor' ? 'doctor' : body?.role === 'nurse' ? 'nurse' : null;
+  const id = String(body?.id ?? '');
+  const email = String(body?.email ?? '').trim().toLowerCase();
+  if (!role || !id) return json({ ok: false, error: 'role (nurse|doctor) and id required' }, 400);
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return json({ ok: false, error: 'valid email required' }, 400);
+  }
+
+  const table = role === 'nurse' ? 'nurses' : 'doctors';
+  const { data: row, error: rowErr } = await db
+    .from(table).select('id, full_name').eq('id', id).maybeSingle();
+  if (rowErr || !row) return json({ ok: false, error: 'not_found' }, 404);
+
+  const password = genStaffPassword();
+  let userId: string | null = null;
+  let created = false;
+
+  const { data: createdUser, error: createErr } = await db.auth.admin.createUser({
+    email, password, email_confirm: true,
+  });
+
+  if (createErr) {
+    const msg = String(createErr.message ?? createErr);
+    if (!/registered|exists|already/i.test(msg)) {
+      console.error('set_staff_login createUser failed:', msg);
+      return json({ ok: false, error: `auth_create_failed: ${msg}` }, 500);
+    }
+    // Email already has an Auth account somewhere — find it and reset its
+    // password instead of making the admin hunt for it in the dashboard.
+    let page = 1;
+    while (!userId && page <= 5) {
+      const { data: listData, error: listErr } = await db.auth.admin.listUsers({ page, perPage: 200 });
+      if (listErr || !listData?.users?.length) break;
+      const match = listData.users.find((u: any) => (u.email || '').toLowerCase() === email);
+      if (match) userId = match.id;
+      if (listData.users.length < 200) break;
+      page += 1;
+    }
+    if (!userId) return json({ ok: false, error: 'email_in_use_elsewhere' }, 409);
+    const { error: updErr } = await db.auth.admin.updateUserById(userId, { password, email_confirm: true });
+    if (updErr) {
+      console.error('set_staff_login password reset failed:', updErr.message);
+      return json({ ok: false, error: `auth_update_failed: ${updErr.message}` }, 500);
+    }
+  } else {
+    userId = createdUser?.user?.id ?? null;
+    created = true;
+    if (!userId) return json({ ok: false, error: 'auth_create_no_id' }, 500);
+  }
+
+  const { error: linkErr } = await db.from(table).update({ email, auth_user_id: userId }).eq('id', id);
+  if (linkErr) {
+    console.error('set_staff_login row link failed:', linkErr.message);
+    return json({ ok: false, error: `row_link_failed: ${linkErr.message}` }, 500);
+  }
+
+  return json({ ok: true, email, password, created, role });
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // HTTP entry
 // ════════════════════════════════════════════════════════════════════════════
@@ -867,7 +940,7 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: 'invalid_json' }, 400);
   }
   const action = String(body?.action ?? '');
-  if (!['register_case', 'send_test_message', 'preview_doc'].includes(action) && !body?.case_id) {
+  if (!['register_case', 'send_test_message', 'preview_doc', 'set_staff_login'].includes(action) && !body?.case_id) {
     return json({ ok: false, error: 'case_id required' }, 400);
   }
 
@@ -891,6 +964,8 @@ Deno.serve(async (req) => {
         return await actionResendInvoice(body.case_id, adminId);
       case 'send_manual_message':
         return await actionSendManualMessage(body.case_id, body.text, adminId);
+      case 'set_staff_login':
+        return await actionSetStaffLogin(body, adminId);
       case 'cancel_case':
         return await actionCancelCase(body.case_id, body.reason, adminId);
       case 'archive_case':

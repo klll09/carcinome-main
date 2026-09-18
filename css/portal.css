@@ -130,6 +130,7 @@
 .pt-signout svg { width: 14px; height: 14px; }
 
 .pt-main { flex: 1; width: 100%; max-width: 640px; margin: 0 auto; padding: var(--s6) var(--s5) var(--s9); }
+.pt-main-wide { max-width: 1040px; }
 .pt-greet { margin-bottom: var(--s6); }
 .pt-greet h1 { font: var(--t-h1); font-size: clamp(24px, 6vw, 30px); color: var(--ink); margin: 0 0 4px; }
 .pt-greet p { font: var(--t-sm); color: var(--ink-3); margin: 0; }
@@ -414,11 +415,11 @@
 .ch-boot h3 { font: var(--t-h3); color: var(--ink); margin: 0; }
 .ch-boot-error svg { width: 26px; height: 26px; color: var(--danger); }
 
+/* was: height: min(70vh, 640px); */
 .ch-wrap {
-  display: grid; grid-template-columns: 290px minmax(0, 1fr);
+  display: grid; grid-template-columns: 300px minmax(0, 1fr);
   gap: var(--s4); align-items: start;
-  /* Tall enough to feel like a chat, short enough to leave the page usable. */
-  height: min(70vh, 640px);
+  height: min(82vh, 820px);
 }
 
 .ch-rooms {

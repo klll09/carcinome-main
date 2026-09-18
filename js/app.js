@@ -24,7 +24,7 @@ let appBooted = false;
 // Legacy hashes (#flows, #flows/docs, #flows/<id>, #sandbox) are NOT registered
 // here: router.js rewrites them to their new route before resolution.
 const PAGES = [
-  'dashboard', 'cases', 'patients', 'nurses', 'suppliers',
+  'dashboard', 'cases', 'patients', 'nurses', 'doctors', 'suppliers',
   'journeys', 'forms', 'copy', 'documents', 'messages', 'chat', 'testsend',
   'settings',
 ];
@@ -60,6 +60,7 @@ const PAGE_TITLES = {
   messages: 'Message log',
   chat: 'Case chats',
   testsend: 'Test send',
+  doctors: 'Doctors',
   settings: 'Settings',
 };
 

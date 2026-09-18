@@ -12,6 +12,7 @@ import { showToast } from '../components/toast.js';
 import { showModal, closeModal, confirmModal } from '../components/modal.js';
 import { escapeHtml, maskPhone, formatDate, renderSkeleton } from '../utils/formatters.js';
 import { validateIndianPhone } from '../utils/validators.js';
+import { adminAction } from '../utils/api.js';
 
 // A nurse is "currently on" a case while it hasn't reached a terminal state.
 const LIVE_STATUSES = ['assigned', 'consented', 'otp_sent', 'in_care', 'care_done', 'awaiting_payment'];
@@ -47,6 +48,48 @@ function poolStatus(n) {
   if (!n.is_active) reasons.push('not active');
   if (!n.is_eligible) reasons.push('Eligible switch is off');
   return { inPool: reasons.length === 0, reasons };
+}
+
+function showCredentialsModal(name, email, password, created) {
+  const overlay = showModal({
+    title: created ? 'Login created' : 'Password reset',
+    size: 'md',
+    content: `
+      <p>${created ? `A portal login was created for` : `The portal password was reset for`} <strong>${escapeHtml(name)}</strong>.
+      Copy this now — it won't be shown again. Share it with them directly.</p>
+      <div class="form-group" style="margin-top:var(--s3)">
+        <label class="form-label">Email</label>
+        <input class="form-input" readonly value="${escapeHtml(email)}" onclick="this.select()" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input class="form-input" readonly value="${escapeHtml(password)}" onclick="this.select()" />
+      </div>
+    `,
+    footer: `<button class="btn btn-primary" data-cred-close type="button">Done</button>`,
+  });
+  overlay.querySelector('[data-cred-close]').addEventListener('click', () => closeModal());
+}
+
+async function issueLogin(btn, role, id, name, emailValue) {
+  const email = String(emailValue || '').trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    showToast('Enter a valid email first, then save', 'warning');
+    return;
+  }
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Working…';
+  try {
+    const res = await adminAction('set_staff_login', { role, id, email });
+    showCredentialsModal(name, res.email, res.password, res.created);
+  } catch (err) {
+    console.error('[issueLogin] failed:', err);
+    showToast(err.message || 'Could not create login', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
 }
 
 // ============================================================ styles (once)
@@ -448,14 +491,15 @@ function openEditNurseModal(container, id) {
       <form id="edit-nurse-form" novalidate>
         <div class="form-row">
           <div class="form-group">
-            <label class="form-label" for="en-name">Full name <span class="required">*</span></label>
-            <input class="form-input" id="en-name" type="text" value="${escapeHtml(nurse.full_name || '')}" required />
-            <span class="form-error" data-err="name" hidden></span>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="en-phone">WhatsApp number <span class="required">*</span></label>
-            <input class="form-input" id="en-phone" type="tel" inputmode="numeric" value="${escapeHtml(nurse.phone || '')}" required />
-            <span class="form-error" data-err="phone" hidden></span>
+            <label class="form-label" for="en-email">Portal login email <span style="text-transform:none;letter-spacing:0">(optional)</span></label>
+            <div style="display:flex; gap:var(--s2); align-items:flex-start">
+              <input class="form-input" id="en-email" type="email" placeholder="nurse@example.com" value="${escapeHtml(nurse.email || '')}" autocomplete="off" style="flex:1" />
+              <button class="btn btn-secondary" id="en-issue-login" type="button" style="white-space:nowrap">
+                ${nurse.auth_user_id ? 'Reset password' : 'Create login'}
+              </button>
+            </div>
+            <span class="form-hint">Save the email first if you just changed it, then click to create or reset the password. No Supabase dashboard needed.</span>
+            <span class="form-error" data-err="email" hidden></span>
           </div>
         </div>
         <div class="form-row">
@@ -494,6 +538,9 @@ function openEditNurseModal(container, id) {
   };
 
   $('[data-en-cancel]').addEventListener('click', () => closeModal());
+  $('#en-issue-login').addEventListener('click', (e) => {
+    issueLogin(e.currentTarget, 'nurse', id, nurse.full_name, $('#en-email').value);
+  });
 
   const saveBtn = $('[data-en-save]');
   saveBtn.addEventListener('click', async () => {
