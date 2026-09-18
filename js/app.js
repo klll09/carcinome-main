@@ -25,7 +25,7 @@ let appBooted = false;
 // here: router.js rewrites them to their new route before resolution.
 const PAGES = [
   'dashboard', 'cases', 'patients', 'nurses', 'doctors', 'suppliers',
-  'journeys', 'forms', 'copy', 'documents', 'messages', 'chat', 'testsend',
+  'journeys', 'forms', 'documents', 'messages', 'chat', 'testsend',
   'settings',
 ];
 
@@ -55,7 +55,6 @@ const PAGE_TITLES = {
   suppliers: 'Marketplace',
   journeys: 'Journeys',
   forms: 'WhatsApp forms',
-  copy: 'Message copy',
   documents: 'Invoice and discharge formats',
   messages: 'Message log',
   chat: 'Case chats',

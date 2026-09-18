@@ -33,7 +33,6 @@ const NAV_ITEMS = [
     items: [
       { id: 'journeys',  label: 'Journeys',     icon: 'flow',        route: 'journeys' },
       { id: 'forms',     label: 'Forms',        icon: 'shieldCheck', route: 'forms' },
-      { id: 'copy',      label: 'Message copy', icon: 'edit',        route: 'copy' },
       { id: 'documents', label: 'Documents',    icon: 'fileText',    route: 'documents' },
       { id: 'chat',      label: 'Case chats',   icon: 'message',     route: 'chat' },
       { id: 'messages',  label: 'Message log',  icon: 'list',        route: 'messages' },
